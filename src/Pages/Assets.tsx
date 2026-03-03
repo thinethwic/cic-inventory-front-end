@@ -45,82 +45,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type AssetStatus = "Available" | "Assigned" | "In Repair" | "Retired";
-
-type Asset = {
-  id: string;
-  assetCode: string;
-  barcode?: string; // ✅ barcode/QR value stored
-  category: string;
-  brand: string;
-  model: string;
-  serialNo: string;
-  status: AssetStatus;
-  location: string;
-  assignedTo?: string;
-  purchaseDate?: string; // YYYY-MM-DD
-  warrantyEnd?: string; // YYYY-MM-DD
-};
-
-const statusOptions: AssetStatus[] = [
-  "Available",
-  "Assigned",
-  "In Repair",
-  "Retired",
-];
-
-const categoryOptions = [
-  "Laptop",
-  "Desktop",
-  "Printer",
-  "Router",
-  "Switch",
-  "Other",
-];
-
-const seedAssets: Asset[] = [
-  {
-    id: "1",
-    assetCode: "CIC-IT-LAP-0021",
-    barcode: "CIC-IT-LAP-0021", // can be same as assetCode
-    category: "Laptop",
-    brand: "Dell",
-    model: "Latitude 5420",
-    serialNo: "DL-5420-A1",
-    status: "Assigned",
-    assignedTo: "E1023 - Daniel Perera",
-    location: "HQ / Finance",
-    purchaseDate: "2025-01-10",
-    warrantyEnd: "2027-01-10",
-  },
-  {
-    id: "2",
-    assetCode: "CIC-IT-PRN-0007",
-    barcode: "HP-M404-77",
-    category: "Printer",
-    brand: "HP",
-    model: "M404dn",
-    serialNo: "HP-M404-77",
-    status: "Available",
-    location: "HQ / Store",
-    purchaseDate: "2024-08-02",
-    warrantyEnd: "2026-08-02",
-  },
-  {
-    id: "3",
-    assetCode: "CIC-IT-NET-0012",
-    barcode: "MT-AC2-12",
-    category: "Router",
-    brand: "MikroTik",
-    model: "hAP ac2",
-    serialNo: "MT-AC2-12",
-    status: "In Repair",
-    location: "Factory / Office",
-  },
-];
+import type { Asset, AssetStatus, AssetFormState } from "@/types";
+import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
+import { seedAssets } from "@/assets.seed";
 
 function StatusBadge({ status }: { status: AssetStatus }) {
-  // shadcn Badge variants: default | secondary | destructive | outline
   const variant =
     status === "Available"
       ? "secondary"
@@ -132,22 +61,6 @@ function StatusBadge({ status }: { status: AssetStatus }) {
 
   return <Badge variant={variant}>{status}</Badge>;
 }
-
-type AssetFormState = Omit<Asset, "id">;
-
-const emptyForm: AssetFormState = {
-  assetCode: "",
-  barcode: "",
-  category: "Laptop",
-  brand: "",
-  model: "",
-  serialNo: "",
-  status: "Available",
-  location: "",
-  assignedTo: "",
-  purchaseDate: "",
-  warrantyEnd: "",
-};
 
 export default function Assets() {
   const [assets, setAssets] = React.useState<Asset[]>(seedAssets);
@@ -168,24 +81,28 @@ export default function Assets() {
   // Dialog state
   const [openForm, setOpenForm] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [form, setForm] = React.useState<AssetFormState>(emptyForm);
+  const [form, setForm] = React.useState<AssetFormState>(emptyAssetForm);
 
   // Delete confirm
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
+
+  // Auto focus scan input when page opens
+  React.useEffect(() => {
+    scanRef.current?.focus();
+  }, []);
 
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
     return assets.filter((a) => {
       const matchText =
         !text ||
-        `${a.assetCode} ${a.barcode ?? ""} ${a.serialNo} ${a.brand} ${a.model} ${
-          a.location
-        } ${a.assignedTo ?? ""}`
+        `${a.assetCode} ${a.barcode ?? ""} ${a.serialNo} ${a.brand} ${a.model} ${a.location} ${a.assignedTo ?? ""}`
           .toLowerCase()
           .includes(text);
 
       const matchStatus =
         statusFilter === "All" ? true : a.status === statusFilter;
+
       const matchCat =
         categoryFilter === "All" ? true : a.category === categoryFilter;
 
@@ -195,13 +112,14 @@ export default function Assets() {
 
   const openAdd = () => {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm(emptyAssetForm);
     setOpenForm(true);
   };
 
   const openEdit = (asset: Asset) => {
     setEditingId(asset.id);
     const { id, ...rest } = asset;
+
     setForm({
       ...rest,
       barcode: rest.barcode ?? "",
@@ -209,6 +127,7 @@ export default function Assets() {
       purchaseDate: rest.purchaseDate ?? "",
       warrantyEnd: rest.warrantyEnd ?? "",
     });
+
     setOpenForm(true);
   };
 
@@ -246,7 +165,7 @@ export default function Assets() {
     setDeleteId(null);
   };
 
-  // ✅ Find asset by scanned barcode/assetCode/serialNo and open edit
+  // Find asset by scanned barcode/assetCode/serialNo and open edit
   const findByBarcode = (barcode: string) => {
     const code = barcode.trim().toLowerCase();
     if (!code) return;
@@ -290,7 +209,7 @@ export default function Assets() {
         </Button>
       </div>
 
-      {/* ✅ Barcode Scan Card */}
+      {/* Barcode Scan Card */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">

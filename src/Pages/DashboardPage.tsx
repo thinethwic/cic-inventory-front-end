@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Link } from "react-router-dom";
 
 type Activity = {
   id: string;
@@ -123,7 +124,7 @@ export default function DashboardPage() {
         <CardContent className="flex flex-wrap gap-2">
           <Button className="gap-2" type="button">
             <ArrowUpRight className="h-4 w-4" />
-            Assign Asset
+            <Link to="/assets">Assign Asset</Link>
           </Button>
 
           <Button variant="secondary" className="gap-2" type="button">
