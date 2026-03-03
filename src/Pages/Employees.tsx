@@ -46,156 +46,25 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-/**
- * INSTALL (if needed):
- * npx shadcn@latest add card button badge table input select dialog alert-dialog dropdown-menu tabs
- */
+// ✅ Types + seed data imported
+import type {
+  Department,
+  Location,
+  Supplier,
+  SystemUser,
+  Employee,
+  UserRole,
+  EmployeeStatus,
+} from "@/types";
+import { genId } from "@/types";
 
-type EntityBase = {
-  id: string;
-  createdAt: string; // YYYY-MM-DD
-};
-
-type Department = EntityBase & {
-  name: string;
-  code: string;
-};
-
-type Location = EntityBase & {
-  name: string;
-  code: string;
-};
-
-type Supplier = EntityBase & {
-  name: string;
-  phone?: string;
-  email?: string;
-};
-
-type UserRole = "Admin" | "Technician" | "Viewer";
-
-type SystemUser = EntityBase & {
-  name: string;
-  email: string;
-  role: UserRole;
-  active: boolean;
-};
-
-type Employee = EntityBase & {
-  empId: string;
-  name: string;
-  departmentId: string;
-  locationId: string;
-  phone?: string;
-  email?: string;
-  status: "Active" | "Inactive";
-};
-
-const seedDepartments: Department[] = [
-  { id: "d1", name: "IT", code: "IT", createdAt: "2026-02-01" },
-  { id: "d2", name: "Finance", code: "FIN", createdAt: "2026-02-01" },
-  { id: "d3", name: "HR", code: "HR", createdAt: "2026-02-01" },
-];
-
-const seedLocations: Location[] = [
-  { id: "l1", name: "HQ - Colombo", code: "HQ-CMB", createdAt: "2026-02-01" },
-  {
-    id: "l2",
-    name: "Factory - Kandy",
-    code: "FAC-KDY",
-    createdAt: "2026-02-01",
-  },
-  {
-    id: "l3",
-    name: "Branch - Negombo",
-    code: "BR-NGM",
-    createdAt: "2026-02-01",
-  },
-];
-
-const seedSuppliers: Supplier[] = [
-  {
-    id: "s1",
-    name: "TechMart (Pvt) Ltd",
-    phone: "+94 77 123 4567",
-    email: "sales@techmart.lk",
-    createdAt: "2026-02-05",
-  },
-  {
-    id: "s2",
-    name: "OfficePro Solutions",
-    phone: "+94 76 987 6543",
-    email: "hello@officepro.lk",
-    createdAt: "2026-02-06",
-  },
-];
-
-const seedUsers: SystemUser[] = [
-  {
-    id: "u1",
-    name: "CIC Admin",
-    email: "admin@cic.lk",
-    role: "Admin",
-    active: true,
-    createdAt: "2026-02-01",
-  },
-  {
-    id: "u2",
-    name: "IT Technician",
-    email: "tech@cic.lk",
-    role: "Technician",
-    active: true,
-    createdAt: "2026-02-02",
-  },
-  {
-    id: "u3",
-    name: "Auditor",
-    email: "audit@cic.lk",
-    role: "Viewer",
-    active: false,
-    createdAt: "2026-02-03",
-  },
-];
-
-const seedEmployees: Employee[] = [
-  {
-    id: "e1",
-    empId: "E1023",
-    name: "Daniel Perera",
-    departmentId: "d2",
-    locationId: "l1",
-    phone: "07X-XXX-XXXX",
-    email: "daniel@cic.lk",
-    status: "Active",
-    createdAt: "2026-02-01",
-  },
-  {
-    id: "e2",
-    empId: "E1144",
-    name: "Kasun Silva",
-    departmentId: "d1",
-    locationId: "l1",
-    phone: "07X-XXX-XXXX",
-    email: "kasun@cic.lk",
-    status: "Active",
-    createdAt: "2026-02-02",
-  },
-  {
-    id: "e3",
-    empId: "E1201",
-    name: "Nimali Fernando",
-    departmentId: "d3",
-    locationId: "l3",
-    phone: "07X-XXX-XXXX",
-    email: "nimali@cic.lk",
-    status: "Inactive",
-    createdAt: "2026-02-05",
-  },
-];
-
-function genId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
-}
+import {
+  seedDepartments,
+  seedLocations,
+  seedSuppliers,
+  seedUsers,
+  seedEmployees,
+} from "@/assets.seed";
 
 function ActionMenu(props: { onEdit: () => void; onDelete: () => void }) {
   return (
@@ -205,6 +74,7 @@ function ActionMenu(props: { onEdit: () => void; onDelete: () => void }) {
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
+
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={props.onEdit}>
           <Pencil className="mr-2 h-4 w-4" /> Edit
@@ -233,7 +103,6 @@ export default function EmployeesPage() {
   const [users, setUsers] = React.useState<SystemUser[]>(seedUsers);
   const [employees, setEmployees] = React.useState<Employee[]>(seedEmployees);
 
-  // Shared delete confirm
   const [deleteTarget, setDeleteTarget] = React.useState<{
     type: "employee" | "department" | "location" | "supplier" | "user";
     id: string;
@@ -255,11 +124,11 @@ export default function EmployeesPage() {
     setDeleteTarget(null);
   };
 
-  // Lookup helpers
   const deptName = React.useCallback(
     (id: string) => departments.find((d) => d.id === id)?.name ?? "-",
     [departments],
   );
+
   const locName = React.useCallback(
     (id: string) => locations.find((l) => l.id === id)?.name ?? "-",
     [locations],
@@ -284,7 +153,6 @@ export default function EmployeesPage() {
           <TabsTrigger value="locations">Locations</TabsTrigger>
         </TabsList>
 
-        {/* ============= EMPLOYEES ============= */}
         <EmployeesTab
           employees={employees}
           setEmployees={setEmployees}
@@ -297,14 +165,12 @@ export default function EmployeesPage() {
           locName={locName}
         />
 
-        {/* ============= USERS ============= */}
         <UsersTab
           users={users}
           setUsers={setUsers}
           onDelete={(id, label) => setDeleteTarget({ type: "user", id, label })}
         />
 
-        {/* ============= SUPPLIERS ============= */}
         <SuppliersTab
           suppliers={suppliers}
           setSuppliers={setSuppliers}
@@ -313,7 +179,6 @@ export default function EmployeesPage() {
           }
         />
 
-        {/* ============= DEPARTMENTS ============= */}
         <DepartmentsTab
           departments={departments}
           setDepartments={setDepartments}
@@ -322,7 +187,6 @@ export default function EmployeesPage() {
           }
         />
 
-        {/* ============= LOCATIONS ============= */}
         <LocationsTab
           locations={locations}
           setLocations={setLocations}
@@ -383,7 +247,7 @@ function EmployeesTab(props: {
   const [deptFilter, setDeptFilter] = React.useState<string | "All">("All");
   const [locFilter, setLocFilter] = React.useState<string | "All">("All");
   const [statusFilter, setStatusFilter] = React.useState<
-    Employee["status"] | "All"
+    EmployeeStatus | "All"
   >("All");
 
   const [openForm, setOpenForm] = React.useState(false);
@@ -402,7 +266,6 @@ function EmployeesTab(props: {
   const [form, setForm] = React.useState(emptyForm);
 
   React.useEffect(() => {
-    // keep defaults valid if lists change
     setForm((p) => ({
       ...p,
       departmentId: p.departmentId || (departments[0]?.id ?? ""),
@@ -541,7 +404,7 @@ function EmployeesTab(props: {
             <Select
               value={statusFilter}
               onValueChange={(v) =>
-                setStatusFilter(v as Employee["status"] | "All")
+                setStatusFilter(v as EmployeeStatus | "All")
               }
             >
               <SelectTrigger>
@@ -731,7 +594,7 @@ function EmployeesTab(props: {
               <Select
                 value={form.status}
                 onValueChange={(v) =>
-                  setForm((p) => ({ ...p, status: v as Employee["status"] }))
+                  setForm((p) => ({ ...p, status: v as EmployeeStatus }))
                 }
               >
                 <SelectTrigger>
@@ -1043,19 +906,17 @@ function SuppliersTab(props: {
     phone: "",
     email: "",
   };
-
   const [form, setForm] = React.useState(emptyForm);
 
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
-    return suppliers.filter((s) => {
-      return (
+    return suppliers.filter(
+      (s) =>
         !text ||
         `${s.name} ${s.phone ?? ""} ${s.email ?? ""}`
           .toLowerCase()
-          .includes(text)
-      );
-    });
+          .includes(text),
+    );
   }, [suppliers, q]);
 
   const openAdd = () => {

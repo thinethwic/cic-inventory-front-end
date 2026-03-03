@@ -43,6 +43,7 @@ export const seedAssets: Asset[] = [
     },
 ];
 
+
 export const seedDepartments: Department[] = [
     { id: "d1", name: "IT", code: "IT", createdAt: "2026-02-01" },
     { id: "d2", name: "Finance", code: "FIN", createdAt: "2026-02-01" },
@@ -51,18 +52,8 @@ export const seedDepartments: Department[] = [
 
 export const seedLocations: Location[] = [
     { id: "l1", name: "HQ - Colombo", code: "HQ-CMB", createdAt: "2026-02-01" },
-    {
-        id: "l2",
-        name: "Factory - Kandy",
-        code: "FAC-KDY",
-        createdAt: "2026-02-01",
-    },
-    {
-        id: "l3",
-        name: "Branch - Negombo",
-        code: "BR-NGM",
-        createdAt: "2026-02-01",
-    },
+    { id: "l2", name: "Factory - Kandy", code: "FAC-KDY", createdAt: "2026-02-01" },
+    { id: "l3", name: "Branch - Negombo", code: "BR-NGM", createdAt: "2026-02-01" },
 ];
 
 export const seedSuppliers: Supplier[] = [

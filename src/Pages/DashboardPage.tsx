@@ -1,4 +1,3 @@
-import * as React from "react";
 import { useUser } from "@clerk/clerk-react";
 import {
   Laptop,

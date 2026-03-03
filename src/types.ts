@@ -51,6 +51,8 @@ export const emptyAssetForm: AssetFormState = {
     warrantyEnd: "",
 };
 
+// src/types/management.ts
+
 export type EntityBase = {
     id: string;
     createdAt: string; // YYYY-MM-DD
@@ -81,6 +83,8 @@ export type SystemUser = EntityBase & {
     active: boolean;
 };
 
+export type EmployeeStatus = "Active" | "Inactive";
+
 export type Employee = EntityBase & {
     empId: string;
     name: string;
@@ -88,5 +92,10 @@ export type Employee = EntityBase & {
     locationId: string;
     phone?: string;
     email?: string;
-    status: "Active" | "Inactive";
+    status: EmployeeStatus;
 };
+
+// Reusable helper
+export function genId(prefix: string) {
+    return `${prefix}-${crypto.randomUUID()}`;
+}
