@@ -53,7 +53,9 @@ export default function AppSidebar() {
           <img src={logo} alt="CIC Logo" className="h-10 w-10 object-contain" />
           <div className="leading-tight">
             <div className="font-semibold">Asset Management</div>
-            <div className="text-xs text-muted-foreground">CIC IT System</div>
+            <div className="text-xs text-muted-foreground">
+              CIC Feeds PVT LTD{" "}
+            </div>
           </div>
         </div>
       </SidebarHeader>
