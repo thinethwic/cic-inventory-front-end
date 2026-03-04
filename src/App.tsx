@@ -8,6 +8,9 @@ import DashboardLayout from "./components/DashboardLayout";
 import Dashboard from "./Pages/DashboardPage"; // create simple page
 import Assets from "./Pages/Assets";
 import EmployeesPage from "./Pages/Employees";
+import MaintenancePage from "./Pages/Maintenance";
+import ReportsPage from "./Pages/Reports";
+import AuditLogsPage from "./Pages/AuditLogs";
 
 export default function App() {
   return (
@@ -35,8 +38,10 @@ export default function App() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="assets" element={<Assets />} />
         <Route path="employees" element={<EmployeesPage />} />
+        <Route path="maintenance" element={<MaintenancePage />} />
+        <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/audit" element={<AuditLogsPage />} />
       </Route>
-
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -1,41 +1,68 @@
-// src/types/asset.ts
+// src/types.ts
 
-export type AssetStatus = "Available" | "Assigned" | "In Repair" | "Retired";
+// ─── Status — mirrors backend AssetStatus enum ────────────────────────────────
+// Backend:  AVAILABLE | ASSIGNED | MAINTENANCE | RETIRED
+// Frontend: Available | Assigned  | In Repair   | Disposed
+export type AssetStatus = "Available" | "Assigned" | "In Repair" | "Disposed";
 
 export const statusOptions: AssetStatus[] = [
     "Available",
     "Assigned",
-    "In Repair",
-    "Retired",
+    "In Repair",   // → sent to backend as MAINTENANCE
+    "Disposed",    // → sent to backend as RETIRED
 ];
 
-export const categoryOptions = [
+// ─── Category — mirrors backend AssetCategory enum ───────────────────────────
+// Backend:  LAPTOP | DESKTOP | MONITOR | PRINTER | ROUTER | SWITCH | OTHER
+export type AssetCategory =
+    | "Laptop"
+    | "Desktop"
+    | "Monitor"
+    | "Printer"
+    | "Router"
+    | "Switch"
+    | "Other";
+
+export const categoryOptions: AssetCategory[] = [
     "Laptop",
     "Desktop",
+    "Monitor",
     "Printer",
     "Router",
     "Switch",
     "Other",
-] as const;
+];
 
-export type AssetCategory = (typeof categoryOptions)[number];
-
-export type Asset = {
+// ─── Asset ────────────────────────────────────────────────────────────────────
+export interface Asset {
     id: string;
     assetCode: string;
     barcode?: string;
-    category: AssetCategory;
+    category: string;
     brand: string;
     model: string;
     serialNo: string;
     status: AssetStatus;
     location: string;
     assignedTo?: string;
-    purchaseDate?: string; // YYYY-MM-DD
-    warrantyEnd?: string;  // YYYY-MM-DD
-};
+    purchaseDate?: string;
+    warrantyEnd?: string;
+}
 
-export type AssetFormState = Omit<Asset, "id">;
+// ─── Form state (all optional fields as empty string for controlled inputs) ───
+export interface AssetFormState {
+    assetCode: string;
+    barcode: string;
+    category: string;
+    brand: string;
+    model: string;
+    serialNo: string;
+    status: AssetStatus;
+    location: string;
+    assignedTo: string;
+    purchaseDate: string;
+    warrantyEnd: string;
+}
 
 export const emptyAssetForm: AssetFormState = {
     assetCode: "",
@@ -99,3 +126,138 @@ export type Employee = EntityBase & {
 export function genId(prefix: string) {
     return `${prefix}-${crypto.randomUUID()}`;
 }
+
+export type MaintenanceStatus = "Open" | "In Progress" | "Completed" | "Cancelled";
+export type MaintenancePriority = "Low" | "Medium" | "High" | "Critical";
+
+export const maintenanceStatusOptions: MaintenanceStatus[] = [
+    "Open",
+    "In Progress",
+    "Completed",
+    "Cancelled",
+];
+
+export const maintenancePriorityOptions: MaintenancePriority[] = [
+    "Low",
+    "Medium",
+    "High",
+    "Critical",
+];
+
+export type Maintenance = {
+    id: string;
+    ticketNo: string;        // e.g. MT-0001
+    assetId: string;         // link to Asset
+    assetCode: string;       // store snapshot for display
+    issueTitle: string;
+    description?: string;
+    priority: MaintenancePriority;
+    status: MaintenanceStatus;
+
+    reportedDate: string;    // YYYY-MM-DD
+    dueDate?: string;        // YYYY-MM-DD
+    completedDate?: string;  // YYYY-MM-DD
+
+    assignedTo?: string;     // technician name
+    supplier?: string;       // vendor name
+    cost?: number;           // LKR or value
+    notes?: string;
+};
+
+export type MaintenanceFormState = Omit<Maintenance, "id">;
+
+export const emptyMaintenanceForm: MaintenanceFormState = {
+    ticketNo: "",
+    assetId: "",
+    assetCode: "",
+    issueTitle: "",
+    description: "",
+    priority: "Medium",
+    status: "Open",
+    reportedDate: new Date().toISOString().slice(0, 10),
+    dueDate: "",
+    completedDate: "",
+    assignedTo: "",
+    supplier: "",
+    cost: undefined,
+    notes: "",
+};
+
+export type AuditAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "LOGIN"
+  | "LOGOUT"
+  | "EXPORT"
+  | "ASSIGN"
+  | "UNASSIGN"
+  | "MAINTENANCE_OPEN"
+  | "MAINTENANCE_UPDATE"
+  | "MAINTENANCE_CLOSE";
+
+export type AuditEntity =
+  | "ASSET"
+  | "EMPLOYEE"
+  | "USER"
+  | "SUPPLIER"
+  | "DEPARTMENT"
+  | "LOCATION"
+  | "MAINTENANCE"
+  | "REPORT"
+  | "AUTH"
+  | "SYSTEM";
+
+export type AuditSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export const auditActionOptions: AuditAction[] = [
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "LOGIN",
+  "LOGOUT",
+  "EXPORT",
+  "ASSIGN",
+  "UNASSIGN",
+  "MAINTENANCE_OPEN",
+  "MAINTENANCE_UPDATE",
+  "MAINTENANCE_CLOSE",
+];
+
+export const auditEntityOptions: AuditEntity[] = [
+  "ASSET",
+  "EMPLOYEE",
+  "USER",
+  "SUPPLIER",
+  "DEPARTMENT",
+  "LOCATION",
+  "MAINTENANCE",
+  "REPORT",
+  "AUTH",
+  "SYSTEM",
+];
+
+export const auditSeverityOptions: AuditSeverity[] = [
+  "LOW",
+  "MEDIUM",
+  "HIGH",
+  "CRITICAL",
+];
+
+export type AuditLog = {
+  id: string;
+  timestamp: string; // ISO string
+  actorName: string; // user full name
+  actorEmail?: string;
+  action: AuditAction;
+  entity: AuditEntity;
+  entityId?: string;
+  entityLabel?: string; // assetCode / employee name etc.
+  severity: AuditSeverity;
+
+  ip?: string;
+  userAgent?: string;
+
+  summary: string; // short
+  details?: Record<string, unknown>; // optional extra details
+};

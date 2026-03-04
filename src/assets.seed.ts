@@ -1,6 +1,7 @@
 // src/data/assets.seed.ts
 import type { Asset } from "@/types";
 import type { Department, Location, Supplier, SystemUser, Employee } from "@/types";
+import type { Maintenance } from "@/types";
 
 export const seedAssets: Asset[] = [
     {
@@ -32,6 +33,17 @@ export const seedAssets: Asset[] = [
     },
     {
         id: "3",
+        assetCode: "CIC-IT-NET-0012",
+        barcode: "MT-AC2-12",
+        category: "Router",
+        brand: "MikroTik",
+        model: "hAP ac2",
+        serialNo: "MT-AC2-12",
+        status: "In Repair",
+        location: "Factory / Office",
+    },
+    {
+        id: "4",
         assetCode: "CIC-IT-NET-0012",
         barcode: "MT-AC2-12",
         category: "Router",
@@ -133,5 +145,108 @@ export const seedEmployees: Employee[] = [
         email: "nimali@cic.lk",
         status: "Inactive",
         createdAt: "2026-02-05",
+    },
+];
+
+export const seedMaintenance: Maintenance[] = [
+    {
+        id: "m1",
+        ticketNo: "MT-0001",
+        assetId: "1",
+        assetCode: "CIC-IT-LAP-0021",
+        issueTitle: "Battery health degraded",
+        description: "User reports sudden shutdown and low backup time.",
+        priority: "High",
+        status: "In Progress",
+        reportedDate: "2026-03-01",
+        dueDate: "2026-03-07",
+        assignedTo: "IT Technician",
+        supplier: "TechMart (Pvt) Ltd",
+        cost: 0,
+        notes: "Run diagnostics and consider replacement.",
+    },
+    {
+        id: "m2",
+        ticketNo: "MT-0002",
+        assetId: "2",
+        assetCode: "CIC-IT-PRN-0007",
+        issueTitle: "Paper jam error",
+        description: "Frequent jam when printing bulk documents.",
+        priority: "Medium",
+        status: "Open",
+        reportedDate: "2026-03-02",
+        dueDate: "2026-03-06",
+        assignedTo: "",
+        supplier: "",
+        cost: undefined,
+        notes: "",
+    },
+];
+
+import type { AuditLog } from "@/types";
+
+export const seedAuditLogs: AuditLog[] = [
+    {
+        id: "a1",
+        timestamp: "2026-03-04T05:20:10.000Z",
+        actorName: "CIC Admin",
+        actorEmail: "admin@cic.lk",
+        action: "LOGIN",
+        entity: "AUTH",
+        severity: "LOW",
+        ip: "192.168.1.15",
+        userAgent: "Chrome",
+        summary: "User logged in",
+        details: { method: "Clerk" },
+    },
+    {
+        id: "a2",
+        timestamp: "2026-03-04T06:10:00.000Z",
+        actorName: "CIC Admin",
+        actorEmail: "admin@cic.lk",
+        action: "CREATE",
+        entity: "ASSET",
+        entityId: "1",
+        entityLabel: "CIC-IT-LAP-0021",
+        severity: "MEDIUM",
+        summary: "New asset created",
+        details: { assetCode: "CIC-IT-LAP-0021", category: "Laptop" },
+    },
+    {
+        id: "a3",
+        timestamp: "2026-03-04T06:20:00.000Z",
+        actorName: "IT Technician",
+        actorEmail: "tech@cic.lk",
+        action: "ASSIGN",
+        entity: "ASSET",
+        entityId: "1",
+        entityLabel: "CIC-IT-LAP-0021",
+        severity: "MEDIUM",
+        summary: "Asset assigned to employee",
+        details: { assignedTo: "E1023 - Daniel Perera" },
+    },
+    {
+        id: "a4",
+        timestamp: "2026-03-04T07:10:00.000Z",
+        actorName: "IT Technician",
+        actorEmail: "tech@cic.lk",
+        action: "MAINTENANCE_OPEN",
+        entity: "MAINTENANCE",
+        entityId: "m2",
+        entityLabel: "MT-0002",
+        severity: "HIGH",
+        summary: "Maintenance ticket opened",
+        details: { issue: "Paper jam error", assetCode: "CIC-IT-PRN-0007" },
+    },
+    {
+        id: "a5",
+        timestamp: "2026-03-04T07:50:00.000Z",
+        actorName: "CIC Admin",
+        actorEmail: "admin@cic.lk",
+        action: "EXPORT",
+        entity: "REPORT",
+        severity: "LOW",
+        summary: "Exported Assets PDF report",
+        details: { reportType: "Assets PDF" },
     },
 ];

@@ -1,3 +1,5 @@
+// src/Pages/DashboardPage.tsx
+import * as React from "react";
 import { useUser } from "@clerk/clerk-react";
 import {
   Laptop,
@@ -7,6 +9,7 @@ import {
   ArrowUpRight,
   QrCode,
   FileDown,
+  Loader2,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +25,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link } from "react-router-dom";
+import { fetchAssets } from "@/lib/api";
+import type { Asset } from "@/types";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 type Activity = {
   id: string;
   action: string;
@@ -32,13 +38,7 @@ type Activity = {
   status: "Success" | "Pending" | "Failed";
 };
 
-const kpis = [
-  { label: "Total Assets", value: 128, icon: Laptop },
-  { label: "Assigned", value: 92, icon: Users },
-  { label: "In Repair", value: 7, icon: Wrench },
-  { label: "Audit Logs", value: 342, icon: ShieldCheck },
-];
-
+// ─── Static data (unchanged) ──────────────────────────────────────────────────
 const recentActivity: Activity[] = [
   {
     id: "1",
@@ -66,20 +66,86 @@ const recentActivity: Activity[] = [
   },
 ];
 
-const warrantyExpiring = [
-  { assetCode: "CIC-IT-LAP-0009", model: "Dell Latitude 5420", days: 12 },
-  { assetCode: "CIC-IT-NET-0012", model: "MikroTik hAP ac2", days: 18 },
-  { assetCode: "CIC-IT-PRN-0003", model: "HP M404dn", days: 25 },
-];
-
 function statusBadge(status: Activity["status"]) {
   if (status === "Success") return <Badge>Success</Badge>;
   if (status === "Pending") return <Badge variant="secondary">Pending</Badge>;
   return <Badge variant="destructive">Failed</Badge>;
 }
 
+// ─── KPI stat derived from assets ────────────────────────────────────────────
+interface KpiStats {
+  total: number;
+  assigned: number;
+  inRepair: number;
+  disposed: number;
+}
+
+function computeStats(assets: Asset[]): KpiStats {
+  return {
+    total: assets.length,
+    assigned: assets.filter((a) => a.status === "Assigned").length,
+    inRepair: assets.filter((a) => a.status === "In Repair").length,
+    disposed: assets.filter((a) => a.status === "Disposed").length,
+  };
+}
+
+// ─── Warranty expiring: assets whose warrantyEnd is within 60 days ────────────
+function getWarrantyExpiring(assets: Asset[]) {
+  const today = new Date();
+  return assets
+    .filter((a) => {
+      if (!a.warrantyEnd) return false;
+      const end = new Date(a.warrantyEnd);
+      const diffDays = Math.ceil(
+        (end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      return diffDays > 0 && diffDays <= 60;
+    })
+    .map((a) => ({
+      assetCode: a.assetCode,
+      model: `${a.brand} ${a.model}`.trim(),
+      days: Math.ceil(
+        (new Date(a.warrantyEnd!).getTime() - today.getTime()) /
+          (1000 * 60 * 60 * 24),
+      ),
+    }))
+    .sort((a, b) => a.days - b.days)
+    .slice(0, 5);
+}
+
+// ─── Dashboard Page ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useUser();
+
+  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await fetchAssets();
+        setAssets(data);
+      } catch {
+        // silently fail
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const stats = React.useMemo(() => computeStats(assets), [assets]);
+  const warrantyExpiring = React.useMemo(
+    () => getWarrantyExpiring(assets),
+    [assets],
+  );
+
+  const kpis = [
+    { label: "Total Assets", value: stats.total, icon: Laptop },
+    { label: "Assigned", value: stats.assigned, icon: Users },
+    { label: "In Repair", value: stats.inRepair, icon: Wrench },
+    { label: "Disposed", value: stats.disposed, icon: ShieldCheck },
+  ];
 
   return (
     <div className="space-y-6">
@@ -105,9 +171,13 @@ export default function DashboardPage() {
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{k.value}</div>
+                {loading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : (
+                  <div className="text-2xl font-bold">{k.value}</div>
+                )}
                 <p className="text-xs text-muted-foreground mt-1">
-                  Updated just now
+                  {loading ? "Loading…" : "Live from server"}
                 </p>
               </CardContent>
             </Card>
@@ -115,7 +185,7 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Quick actions */}
+      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Quick Actions</CardTitle>
@@ -125,17 +195,14 @@ export default function DashboardPage() {
             <ArrowUpRight className="h-4 w-4" />
             <Link to="/assets">Assign Asset</Link>
           </Button>
-
           <Button variant="secondary" className="gap-2" type="button">
             <Wrench className="h-4 w-4" />
-            Add Maintenance
+            <Link to="/maintenance">Add Maintenance</Link>
           </Button>
-
           <Button variant="outline" className="gap-2" type="button">
             <QrCode className="h-4 w-4" />
             Print QR Labels
           </Button>
-
           <Button variant="outline" className="gap-2" type="button">
             <FileDown className="h-4 w-4" />
             Export Report
@@ -144,7 +211,7 @@ export default function DashboardPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Recent activity */}
+        {/* Recent Activity */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Recent Activity</CardTitle>
@@ -180,9 +247,7 @@ export default function DashboardPage() {
                 ))}
               </TableBody>
             </Table>
-
             <Separator className="my-4" />
-
             <div className="flex justify-end">
               <Button variant="ghost" className="gap-2" type="button">
                 View all logs <ArrowUpRight className="h-4 w-4" />
@@ -191,28 +256,37 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Warranty expiring */}
+        {/* Warranty Expiring */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Warranty Expiring</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {warrantyExpiring.map((w) => (
-              <div key={w.assetCode} className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-medium">{w.assetCode}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {w.model}
-                    </div>
-                  </div>
-                  <Badge variant={w.days <= 14 ? "destructive" : "secondary"}>
-                    {w.days} days
-                  </Badge>
-                </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
-            ))}
-
+            ) : warrantyExpiring.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">
+                No warranties expiring in the next 60 days.
+              </p>
+            ) : (
+              warrantyExpiring.map((w) => (
+                <div key={w.assetCode} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-medium">{w.assetCode}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {w.model}
+                      </div>
+                    </div>
+                    <Badge variant={w.days <= 14 ? "destructive" : "secondary"}>
+                      {w.days}d
+                    </Badge>
+                  </div>
+                </div>
+              ))
+            )}
             <Button variant="outline" className="w-full" type="button">
               View Warranty Report
             </Button>
