@@ -1,4 +1,3 @@
-import * as React from "react";
 import {
   BarChart,
   Bar,
@@ -17,11 +16,9 @@ import { Download, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
-import type { Asset } from "@/types";
-import type { Maintenance } from "@/types";
+import type { Asset, Maintenance } from "@/types";
 
-import { seedAssets } from "@/assets.seed";
-import { seedMaintenance } from "@/assets.seed";
+import { seedAssets, seedMaintenance } from "@/assets.seed";
 
 import {
   generateAssetReport,
@@ -32,7 +29,8 @@ type ChartRow = { name: string; value: number };
 
 const COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7"];
 
-function buildCountData(items: string[]): ChartRow[] {
+// Generic so AssetStatus, AssetCategory, MaintenanceStatus etc. all work
+function buildCountData<T extends string>(items: T[]): ChartRow[] {
   const map: Record<string, number> = {};
   items.forEach((x) => (map[x] = (map[x] || 0) + 1));
   return Object.entries(map).map(([name, value]) => ({ name, value }));
@@ -42,12 +40,12 @@ export default function ReportsPage() {
   const assets: Asset[] = seedAssets;
   const maintenance: Maintenance[] = seedMaintenance;
 
-  // KPI
+  // ── KPI ───────────────────────────────────────────────────────────────────
   const totalAssets = assets.length;
   const availableAssets = assets.filter((a) => a.status === "Available").length;
   const assignedAssets = assets.filter((a) => a.status === "Assigned").length;
   const repairAssets = assets.filter((a) => a.status === "In Repair").length;
-  const retiredAssets = assets.filter((a) => a.status === "Retired").length;
+  const disposedAssets = assets.filter((a) => a.status === "Disposed").length;
 
   const openMaintenance = maintenance.filter(
     (m) => m.status !== "Completed" && m.status !== "Cancelled",
@@ -55,34 +53,24 @@ export default function ReportsPage() {
 
   const totalMaintenance = maintenance.length;
 
-  const totalMaintenanceCost = maintenance.reduce((sum, m) => {
-    return sum + (typeof m.cost === "number" ? m.cost : 0);
-  }, 0);
-
-  // Charts
-  const assetStatusData = React.useMemo(
-    () => buildCountData(assets.map((a) => a.status)),
-    [assets],
+  const totalMaintenanceCost = maintenance.reduce(
+    (sum, m) => sum + (typeof m.cost === "number" ? m.cost : 0),
+    0,
   );
 
-  const assetCategoryData = React.useMemo(
-    () => buildCountData(assets.map((a) => a.category)),
-    [assets],
+  // ── Charts — no useMemo, React Compiler handles memoization automatically ─
+  const assetStatusData = buildCountData(assets.map((a) => a.status));
+  const assetCategoryData = buildCountData(assets.map((a) => a.category));
+  const maintenanceStatusData = buildCountData(
+    maintenance.map((m) => m.status),
   );
-
-  const maintenanceStatusData = React.useMemo(
-    () => buildCountData(maintenance.map((m) => m.status)),
-    [maintenance],
-  );
-
-  const maintenancePriorityData = React.useMemo(
-    () => buildCountData(maintenance.map((m) => m.priority)),
-    [maintenance],
+  const maintenancePriorityData = buildCountData(
+    maintenance.map((m) => m.priority),
   );
 
   return (
     <div className="space-y-6">
-      {/* Header + PDF actions */}
+      {/* ── Header ── */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -115,7 +103,7 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* ── KPI Cards ── */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -137,7 +125,7 @@ export default function ReportsPage() {
             {repairAssets}
           </CardContent>
           <CardContent className="pt-0 text-xs text-muted-foreground">
-            Retired: {retiredAssets}
+            Disposed: {disposedAssets}
           </CardContent>
         </Card>
 
@@ -166,9 +154,8 @@ export default function ReportsPage() {
         </Card>
       </div>
 
-      {/* Charts Row 1 */}
+      {/* ── Charts Row 1 ── */}
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Asset Status Pie */}
         <Card>
           <CardHeader>
             <CardTitle>Asset Status Distribution</CardTitle>
@@ -194,7 +181,6 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
 
-        {/* Asset Categories Bar */}
         <Card>
           <CardHeader>
             <CardTitle>Assets by Category</CardTitle>
@@ -213,9 +199,8 @@ export default function ReportsPage() {
         </Card>
       </div>
 
-      {/* Charts Row 2 */}
+      {/* ── Charts Row 2 ── */}
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Maintenance Status Bar */}
         <Card>
           <CardHeader>
             <CardTitle>Maintenance by Status</CardTitle>
@@ -233,7 +218,6 @@ export default function ReportsPage() {
           </CardContent>
         </Card>
 
-        {/* Maintenance Priority Pie */}
         <Card>
           <CardHeader>
             <CardTitle>Maintenance by Priority</CardTitle>

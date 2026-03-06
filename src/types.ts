@@ -2,8 +2,8 @@
 
 // ─── Status — mirrors backend AssetStatus enum ────────────────────────────────
 // Backend:  AVAILABLE | ASSIGNED | MAINTENANCE | RETIRED
-// Frontend: Available | Assigned  | In Repair   | Disposed
-export type AssetStatus = "Available" | "Assigned" | "In Repair" | "Disposed";
+// Frontend: Available | Assigned  | In Repair   | Disposed | Retired
+export type AssetStatus = "Available" | "Assigned" | "In Repair" | "Disposed" | "Retired";
 
 export const statusOptions: AssetStatus[] = [
     "Available",
@@ -59,7 +59,7 @@ export type AssetFormState = {
     serialNo: string;
     status: AssetStatus;
     locationId: string;
-    assignedEmployeeId?: string;
+    assignedToId?: string;      // FIX: was assignedEmployeeId — must match Assets.tsx usage
     purchaseDate?: string;
     warrantyEnd?: string;
 };
@@ -73,16 +73,15 @@ export const emptyAssetForm: AssetFormState = {
     serialNo: "",
     status: "Available",
     locationId: "",
-    assignedEmployeeId: "",
+    assignedToId: "",           // FIX: was assignedEmployeeId
     purchaseDate: "",
     warrantyEnd: "",
 };
 
-// src/types/management.ts
-
+// ─── Entity base — backend returns Long (number) for id ───────────────────────
 export type EntityBase = {
-    id: string;
-    createdAt: string; // YYYY-MM-DD
+    id: number;             // FIX: was string — backend Long maps to number
+    createdAt?: string;     // YYYY-MM-DD (optional: not always returned)
 };
 
 export type Department = EntityBase & {
@@ -112,15 +111,17 @@ export type SystemUser = EntityBase & {
 
 export type EmployeeStatus = "ACTIVE" | "INACTIVE";
 
+// FIX: department and location are nested objects from the backend (not flat strings).
+// FIX: employeeStatus replaces status to match backend field name.
+// FIX: id is number (Long), inherited correctly from EntityBase now.
 export type Employee = EntityBase & {
-    id: string;
     empId: string;
     name: string;
-    department: string; // actually department id
-    location: string;   // actually location id
+    department: { id: number; name: string; code: string } | null;
+    location: { id: number; name: string; code: string } | null;
     phone_no?: string;
     email?: string;
-    status: EmployeeStatus;
+    employeeStatus?: EmployeeStatus;  // FIX: was "status" — backend field is employeeStatus
 };
 
 // Reusable helper
@@ -147,21 +148,19 @@ export const maintenancePriorityOptions: MaintenancePriority[] = [
 
 export type Maintenance = {
     id: string;
-    ticketNo: string;        // e.g. MT-0001
-    assetId: string;         // link to Asset
-    assetCode: string;       // store snapshot for display
+    ticketNo: string;
+    assetId: string;
+    assetCode: string;
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
     status: MaintenanceStatus;
-
-    reportedDate: string;    // YYYY-MM-DD
-    dueDate?: string;        // YYYY-MM-DD
-    completedDate?: string;  // YYYY-MM-DD
-
-    assignedTo?: string;     // technician name
-    supplier?: string;       // vendor name
-    cost?: number;           // LKR or value
+    reportedDate: string;
+    dueDate?: string;
+    completedDate?: string;
+    assignedTo?: string;
+    supplier?: string;
+    cost?: number;
     notes?: string;
 };
 
@@ -247,18 +246,16 @@ export const auditSeverityOptions: AuditSeverity[] = [
 
 export type AuditLog = {
     id: string;
-    timestamp: string; // ISO string
-    actorName: string; // user full name
+    timestamp: string;
+    actorName: string;
     actorEmail?: string;
     action: AuditAction;
     entity: AuditEntity;
     entityId?: string;
-    entityLabel?: string; // assetCode / employee name etc.
+    entityLabel?: string;
     severity: AuditSeverity;
-
     ip?: string;
     userAgent?: string;
-
-    summary: string; // short
-    details?: Record<string, unknown>; // optional extra details
+    summary: string;
+    details?: Record<string, unknown>;
 };
