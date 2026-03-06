@@ -50,19 +50,19 @@ export interface Asset {
 }
 
 // ─── Form state (all optional fields as empty string for controlled inputs) ───
-export interface AssetFormState {
+export type AssetFormState = {
     assetCode: string;
-    barcode: string;
+    barcode?: string;
     category: string;
     brand: string;
     model: string;
     serialNo: string;
     status: AssetStatus;
-    location: string;
-    assignedTo: string;
-    purchaseDate: string;
-    warrantyEnd: string;
-}
+    locationId: string;
+    assignedEmployeeId?: string;
+    purchaseDate?: string;
+    warrantyEnd?: string;
+};
 
 export const emptyAssetForm: AssetFormState = {
     assetCode: "",
@@ -72,8 +72,8 @@ export const emptyAssetForm: AssetFormState = {
     model: "",
     serialNo: "",
     status: "Available",
-    location: "",
-    assignedTo: "",
+    locationId: "",
+    assignedEmployeeId: "",
     purchaseDate: "",
     warrantyEnd: "",
 };
@@ -110,14 +110,15 @@ export type SystemUser = EntityBase & {
     active: boolean;
 };
 
-export type EmployeeStatus = "Active" | "Inactive";
+export type EmployeeStatus = "ACTIVE" | "INACTIVE";
 
 export type Employee = EntityBase & {
+    id: string;
     empId: string;
     name: string;
-    departmentId: string;
-    locationId: string;
-    phone?: string;
+    department: string; // actually department id
+    location: string;   // actually location id
+    phone_no?: string;
     email?: string;
     status: EmployeeStatus;
 };
@@ -184,80 +185,80 @@ export const emptyMaintenanceForm: MaintenanceFormState = {
 };
 
 export type AuditAction =
-  | "CREATE"
-  | "UPDATE"
-  | "DELETE"
-  | "LOGIN"
-  | "LOGOUT"
-  | "EXPORT"
-  | "ASSIGN"
-  | "UNASSIGN"
-  | "MAINTENANCE_OPEN"
-  | "MAINTENANCE_UPDATE"
-  | "MAINTENANCE_CLOSE";
+    | "CREATE"
+    | "UPDATE"
+    | "DELETE"
+    | "LOGIN"
+    | "LOGOUT"
+    | "EXPORT"
+    | "ASSIGN"
+    | "UNASSIGN"
+    | "MAINTENANCE_OPEN"
+    | "MAINTENANCE_UPDATE"
+    | "MAINTENANCE_CLOSE";
 
 export type AuditEntity =
-  | "ASSET"
-  | "EMPLOYEE"
-  | "USER"
-  | "SUPPLIER"
-  | "DEPARTMENT"
-  | "LOCATION"
-  | "MAINTENANCE"
-  | "REPORT"
-  | "AUTH"
-  | "SYSTEM";
+    | "ASSET"
+    | "EMPLOYEE"
+    | "USER"
+    | "SUPPLIER"
+    | "DEPARTMENT"
+    | "LOCATION"
+    | "MAINTENANCE"
+    | "REPORT"
+    | "AUTH"
+    | "SYSTEM";
 
 export type AuditSeverity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
 export const auditActionOptions: AuditAction[] = [
-  "CREATE",
-  "UPDATE",
-  "DELETE",
-  "LOGIN",
-  "LOGOUT",
-  "EXPORT",
-  "ASSIGN",
-  "UNASSIGN",
-  "MAINTENANCE_OPEN",
-  "MAINTENANCE_UPDATE",
-  "MAINTENANCE_CLOSE",
+    "CREATE",
+    "UPDATE",
+    "DELETE",
+    "LOGIN",
+    "LOGOUT",
+    "EXPORT",
+    "ASSIGN",
+    "UNASSIGN",
+    "MAINTENANCE_OPEN",
+    "MAINTENANCE_UPDATE",
+    "MAINTENANCE_CLOSE",
 ];
 
 export const auditEntityOptions: AuditEntity[] = [
-  "ASSET",
-  "EMPLOYEE",
-  "USER",
-  "SUPPLIER",
-  "DEPARTMENT",
-  "LOCATION",
-  "MAINTENANCE",
-  "REPORT",
-  "AUTH",
-  "SYSTEM",
+    "ASSET",
+    "EMPLOYEE",
+    "USER",
+    "SUPPLIER",
+    "DEPARTMENT",
+    "LOCATION",
+    "MAINTENANCE",
+    "REPORT",
+    "AUTH",
+    "SYSTEM",
 ];
 
 export const auditSeverityOptions: AuditSeverity[] = [
-  "LOW",
-  "MEDIUM",
-  "HIGH",
-  "CRITICAL",
+    "LOW",
+    "MEDIUM",
+    "HIGH",
+    "CRITICAL",
 ];
 
 export type AuditLog = {
-  id: string;
-  timestamp: string; // ISO string
-  actorName: string; // user full name
-  actorEmail?: string;
-  action: AuditAction;
-  entity: AuditEntity;
-  entityId?: string;
-  entityLabel?: string; // assetCode / employee name etc.
-  severity: AuditSeverity;
+    id: string;
+    timestamp: string; // ISO string
+    actorName: string; // user full name
+    actorEmail?: string;
+    action: AuditAction;
+    entity: AuditEntity;
+    entityId?: string;
+    entityLabel?: string; // assetCode / employee name etc.
+    severity: AuditSeverity;
 
-  ip?: string;
-  userAgent?: string;
+    ip?: string;
+    userAgent?: string;
 
-  summary: string; // short
-  details?: Record<string, unknown>; // optional extra details
+    summary: string; // short
+    details?: Record<string, unknown>; // optional extra details
 };

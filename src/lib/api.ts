@@ -1,4 +1,4 @@
-// src/api.ts
+// src/lib/api.ts
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
 // ─── Base config ──────────────────────────────────────────────────────────────
@@ -14,18 +14,29 @@ interface SpringPage<T> {
     size: number;
 }
 
-// ─── Raw shape from Spring Boot ───────────────────────────────────────────────
+// ─── Raw response shape from backend ──────────────────────────────────────────
+interface RawLocation {
+    id?: number;
+    name?: string;
+}
+
+interface RawEmployee {
+    id?: number;
+    empId?: string;
+    name?: string;
+}
+
 interface RawAsset {
     id: number;
     assetCode: string;
     barcode?: string | null;
-    category: string;   // "LAPTOP" | "DESKTOP" | "MONITOR" | "PRINTER" | "ROUTER" | "SWITCH" | "OTHER"
+    category: string;
     brand: string;
     model: string;
     serialNo: string;
-    status: string;     // "AVAILABLE" | "ASSIGNED" | "MAINTENANCE" | "RETIRED"
-    location: string;
-    assignedTo?: string | null;
+    status: string;
+    location?: string | RawLocation | null;
+    assignedTo?: string | RawEmployee | null;
     purchaseDate?: string | null;
     warrantyEnd?: string | null;
     createdAt?: string;
@@ -33,12 +44,11 @@ interface RawAsset {
 }
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
-// AssetStatus enum in backend:  AVAILABLE | ASSIGNED | MAINTENANCE | RETIRED
 const STATUS_TO_FRONTEND: Record<string, AssetStatus> = {
     AVAILABLE: "Available",
     ASSIGNED: "Assigned",
-    MAINTENANCE: "In Repair",   // maps to your existing "In Repair" UI label
-    RETIRED: "Disposed",    // maps to your existing "Disposed" UI label
+    MAINTENANCE: "In Repair",
+    RETIRED: "Disposed",
 };
 
 const STATUS_TO_BACKEND: Record<string, string> = {
@@ -49,7 +59,6 @@ const STATUS_TO_BACKEND: Record<string, string> = {
 };
 
 // ─── Category maps ────────────────────────────────────────────────────────────
-// AssetCategory enum in backend: LAPTOP | DESKTOP | MONITOR | PRINTER | ROUTER | SWITCH | OTHER
 const CATEGORY_TO_FRONTEND: Record<string, string> = {
     LAPTOP: "Laptop",
     DESKTOP: "Desktop",
@@ -70,15 +79,37 @@ const CATEGORY_TO_BACKEND: Record<string, string> = {
     Other: "OTHER",
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function getLocationName(location?: string | RawLocation | null): string {
+    if (!location) return "";
+    if (typeof location === "string") return location;
+    return location.name ?? "";
+}
+
+function getAssignedToLabel(assignedTo?: string | RawEmployee | null): string {
+    if (!assignedTo) return "";
+    if (typeof assignedTo === "string") return assignedTo;
+
+    const empId = assignedTo.empId ?? "";
+    const name = assignedTo.name ?? "";
+
+    if (empId && name) return `${empId} - ${name}`;
+    return name || empId || "";
+}
+
 // ─── Transformers ─────────────────────────────────────────────────────────────
 function toAsset(raw: RawAsset): Asset {
     return {
-        ...raw,
         id: String(raw.id),
-        status: STATUS_TO_FRONTEND[raw.status] ?? (raw.status as AssetStatus),
-        category: CATEGORY_TO_FRONTEND[raw.category] ?? raw.category,
+        assetCode: raw.assetCode ?? "",
         barcode: raw.barcode ?? "",
-        assignedTo: raw.assignedTo ?? "",
+        category: CATEGORY_TO_FRONTEND[raw.category] ?? raw.category,
+        brand: raw.brand ?? "",
+        model: raw.model ?? "",
+        serialNo: raw.serialNo ?? "",
+        status: STATUS_TO_FRONTEND[raw.status] ?? (raw.status as AssetStatus),
+        location: getLocationName(raw.location),
+        assignedTo: getAssignedToLabel(raw.assignedTo),
         purchaseDate: raw.purchaseDate ?? "",
         warrantyEnd: raw.warrantyEnd ?? "",
     };
@@ -86,86 +117,137 @@ function toAsset(raw: RawAsset): Asset {
 
 function toRequestBody(form: AssetFormState) {
     return {
-        ...form,
-        status: STATUS_TO_BACKEND[form.status] ?? form.status,
+        assetCode: form.assetCode.trim(),
+        barcode: form.barcode?.trim() || null,
         category: CATEGORY_TO_BACKEND[form.category] ?? form.category,
-        barcode: form.barcode || null,
-        assignedTo: form.assignedTo || null,
+        brand: form.brand.trim(),
+        model: form.model.trim(),
+        serialNo: form.serialNo.trim(),
+        status: STATUS_TO_BACKEND[form.status] ?? form.status,
+        // ✅ Send flat IDs — matches the updated AssetDTO (locationId / assignedToId)
+        locationId: Number(form.locationId),
+        assignedToId: form.assignedToId?.trim()
+            ? Number(form.assignedToId)
+            : null,
         purchaseDate: form.purchaseDate || null,
         warrantyEnd: form.warrantyEnd || null,
     };
 }
 
-// ─── HTTP helper ──────────────────────────────────────────────────────────────
+// ─── Response helper ──────────────────────────────────────────────────────────
 async function handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
         const message = await res.text().catch(() => `HTTP ${res.status}`);
         throw new Error(message || `Request failed with status ${res.status}`);
     }
+
     if (res.status === 204) return undefined as T;
+
     return res.json() as Promise<T>;
 }
+
+// ─── Clerk auth integration ───────────────────────────────────────────────────
+export type GetTokenFn = (opts?: { template?: string }) => Promise<string | null>;
 
 const defaultHeaders = {
     "Content-Type": "application/json",
     Accept: "application/json",
 };
 
-export async function fetchAssets(): Promise<Asset[]> {
-    const res = await fetch(`${ASSETS_ENDPOINT}?page=0&size=200`, {
-        method: "GET",
-        headers: defaultHeaders,
-    });
-    const page = await handleResponse<SpringPage<RawAsset>>(res);
-    return page.content.map(toAsset);
+async function authFetch(
+    getToken: GetTokenFn,
+    url: string,
+    init: RequestInit = {},
+    template = "cic-inventory",
+) {
+    const token = await getToken({ template });
+    console.log(token)
+    if (!token) throw new Error("No auth token (user not signed in)");
+
+    const headers = {
+        ...defaultHeaders,
+        ...(init.headers ?? {}),
+        Authorization: `Bearer ${token}`,
+    };
+
+    return fetch(url, { ...init, headers });
 }
 
-export async function fetchAssetById(id: string): Promise<Asset> {
-    const res = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+// ─── API functions ────────────────────────────────────────────────────────────
+export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?page=0&size=200`, {
         method: "GET",
-        headers: defaultHeaders,
     });
+
+    const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
+
+    if (Array.isArray(data)) {
+        return data.map(toAsset);
+    }
+
+    return Array.isArray(data.content) ? data.content.map(toAsset) : [];
+}
+
+export async function fetchAssetById(
+    getToken: GetTokenFn,
+    id: string,
+): Promise<Asset> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
+        method: "GET",
+    });
+
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-/** GET /api/assets/scan?q={code}  →  Asset (by barcode / serial / assetCode) */
-export async function fetchAssetByScan(code: string): Promise<Asset> {
-    const res = await fetch(
+export async function fetchAssetByScan(
+    getToken: GetTokenFn,
+    code: string,
+): Promise<Asset> {
+    const res = await authFetch(
+        getToken,
         `${ASSETS_ENDPOINT}/scan?q=${encodeURIComponent(code)}`,
-        { method: "GET", headers: defaultHeaders },
+        { method: "GET" },
     );
+
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-/** POST /api/assets  →  Asset */
-export async function createAsset(data: AssetFormState): Promise<Asset> {
-    const res = await fetch(ASSETS_ENDPOINT, {
+export async function createAsset(
+    getToken: GetTokenFn,
+    data: AssetFormState,
+): Promise<Asset> {
+    const res = await authFetch(getToken, ASSETS_ENDPOINT, {
         method: "POST",
-        headers: defaultHeaders,
         body: JSON.stringify(toRequestBody(data)),
     });
+
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-/** PUT /api/assets/{id}  →  Asset */
-export async function updateAsset(id: string, data: AssetFormState): Promise<Asset> {
-    const res = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+export async function updateAsset(
+    getToken: GetTokenFn,
+    id: string,
+    data: AssetFormState,
+): Promise<Asset> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
         method: "PUT",
-        headers: defaultHeaders,
         body: JSON.stringify(toRequestBody(data)),
     });
+
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-/** DELETE /api/assets/{id}  →  void */
-export async function deleteAsset(id: string): Promise<void> {
-    const res = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+export async function deleteAsset(
+    getToken: GetTokenFn,
+    id: string,
+): Promise<void> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
         method: "DELETE",
-        headers: defaultHeaders,
     });
+
     return handleResponse<void>(res);
 }

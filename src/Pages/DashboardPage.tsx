@@ -1,6 +1,6 @@
 // src/Pages/DashboardPage.tsx
 import * as React from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import {
   Laptop,
   Users,
@@ -25,7 +25,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link } from "react-router-dom";
+
+// ✅ IMPORTANT: use the auth-enabled fetchAssets(getToken) version
+// If your file is src/api.ts then use: import { fetchAssets } from "@/api";
 import { fetchAssets } from "@/lib/api";
+
 import type { Asset } from "@/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -116,23 +120,48 @@ function getWarrantyExpiring(assets: Asset[]) {
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useUser();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
   const [loading, setLoading] = React.useState(true);
 
+  // ✅ Clerk-auth safe load (api.ts injects Bearer token internally)
   React.useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const data = await fetchAssets();
-        setAssets(data);
-      } catch {
-        // silently fail
-      } finally {
-        setLoading(false);
+    let cancelled = false;
+
+    const load = async () => {
+      // wait for Clerk
+      if (!isLoaded) return;
+
+      // not signed in -> clear
+      if (!isSignedIn) {
+        if (!cancelled) {
+          setAssets([]);
+          setLoading(false);
+        }
+        return;
       }
-    })();
-  }, []);
+
+      if (!cancelled) setLoading(true);
+
+      try {
+        // ✅ NEW: just pass getToken (no manual token building here)
+        const data = await fetchAssets(getToken);
+        if (!cancelled) setAssets(data);
+      } catch (err) {
+        console.error("fetchAssets failed:", err);
+        if (!cancelled) setAssets([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, getToken]);
 
   const stats = React.useMemo(() => computeStats(assets), [assets]);
   const warrantyExpiring = React.useMemo(
@@ -176,7 +205,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="text-2xl font-bold">{k.value}</div>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">
+                <p className="mt-1 text-xs text-muted-foreground">
                   {loading ? "Loading…" : "Live from server"}
                 </p>
               </CardContent>
@@ -191,18 +220,25 @@ export default function DashboardPage() {
           <CardTitle className="text-base">Quick Actions</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Button className="gap-2" type="button">
-            <ArrowUpRight className="h-4 w-4" />
-            <Link to="/assets">Assign Asset</Link>
+          <Button asChild className="gap-2" type="button">
+            <Link to="/assets">
+              <ArrowUpRight className="h-4 w-4" />
+              Assign Asset
+            </Link>
           </Button>
-          <Button variant="secondary" className="gap-2" type="button">
-            <Wrench className="h-4 w-4" />
-            <Link to="/maintenance">Add Maintenance</Link>
+
+          <Button asChild variant="secondary" className="gap-2" type="button">
+            <Link to="/maintenance">
+              <Wrench className="h-4 w-4" />
+              Add Maintenance
+            </Link>
           </Button>
+
           <Button variant="outline" className="gap-2" type="button">
             <QrCode className="h-4 w-4" />
             Print QR Labels
           </Button>
+
           <Button variant="outline" className="gap-2" type="button">
             <FileDown className="h-4 w-4" />
             Export Report
@@ -247,7 +283,9 @@ export default function DashboardPage() {
                 ))}
               </TableBody>
             </Table>
+
             <Separator className="my-4" />
+
             <div className="flex justify-end">
               <Button variant="ghost" className="gap-2" type="button">
                 View all logs <ArrowUpRight className="h-4 w-4" />
@@ -267,7 +305,7 @@ export default function DashboardPage() {
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
             ) : warrantyExpiring.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">
+              <p className="py-6 text-center text-sm text-muted-foreground">
                 No warranties expiring in the next 60 days.
               </p>
             ) : (
@@ -287,6 +325,7 @@ export default function DashboardPage() {
                 </div>
               ))
             )}
+
             <Button variant="outline" className="w-full" type="button">
               View Warranty Report
             </Button>

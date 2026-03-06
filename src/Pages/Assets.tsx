@@ -12,6 +12,9 @@ import {
   Download,
 } from "lucide-react";
 
+import { useAuth } from "@clerk/clerk-react";
+import { useManagementApi } from "@/lib/management-api";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,8 +59,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import type { Asset, AssetStatus, AssetFormState } from "@/types";
+import type {
+  Asset,
+  AssetStatus,
+  AssetFormState,
+  Employee,
+  Location,
+} from "@/types";
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
+
 import {
   fetchAssets,
   fetchAssetByScan,
@@ -66,35 +76,8 @@ import {
   deleteAsset,
 } from "@/lib/api";
 
-// ─── QR Code Generator (canvas-based, no external lib needed) ────────────────
-// Uses the browser's built-in canvas + a lightweight QR encoding approach.
-// We dynamically import "qrcode" (npm: qrcode) which is a standard dep.
-// If your project doesn't have it yet, add: npm install qrcode @types/qrcode
-
 import QRCodeLib from "qrcode";
 
-// ─── QR Code Canvas Component ─────────────────────────────────────────────────
-interface QRCanvasProps {
-  value: string;
-  size?: number;
-}
-
-function QRCanvas({ value, size = 220 }: QRCanvasProps) {
-  const canvasRef = React.useRef<HTMLCanvasElement>(null);
-
-  React.useEffect(() => {
-    if (!canvasRef.current) return;
-    QRCodeLib.toCanvas(canvasRef.current, value, {
-      width: size,
-      margin: 2,
-      color: { dark: "#09090b", light: "#ffffff" },
-    });
-  }, [value, size]);
-
-  return <canvas ref={canvasRef} />;
-}
-
-// ─── QR Code Dialog ────────────────────────────────────────────────────────────
 interface QRDialogProps {
   asset: Asset | null;
   open: boolean;
@@ -102,10 +85,8 @@ interface QRDialogProps {
 }
 
 function QRDialog({ asset, open, onClose }: QRDialogProps) {
-  // Store the canvas element so handleDownload can access it
   const canvasElRef = React.useRef<HTMLCanvasElement | null>(null);
 
-  // Build the QR payload — a compact JSON string with key asset identifiers
   const qrPayload = asset
     ? JSON.stringify({
         assetCode: asset.assetCode,
@@ -116,21 +97,18 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
       })
     : "";
 
-  // Callback ref: fires immediately when the canvas DOM node mounts/unmounts.
-  // This avoids the timing issue where useEffect runs before the canvas exists.
   const canvasCallbackRef = React.useCallback(
     (node: HTMLCanvasElement | null) => {
       canvasElRef.current = node;
       if (!node || !asset) return;
+
       QRCodeLib.toCanvas(node, qrPayload, {
         width: 220,
         margin: 2,
         color: { dark: "#09090b", light: "#ffffff" },
       });
     },
-    // Re-run whenever the asset/payload changes (i.e. a different asset is opened)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [qrPayload],
+    [asset, qrPayload],
   );
 
   const handleDownload = () => {
@@ -155,13 +133,11 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
         </DialogHeader>
 
         <div className="flex flex-col items-center gap-4 py-2">
-          {/* QR canvas */}
           <div className="rounded-lg border bg-white p-3 shadow-inner">
             <canvas ref={canvasCallbackRef} />
           </div>
 
-          {/* Asset summary below QR */}
-          <div className="w-full rounded-md bg-muted/50 px-4 py-3 space-y-1 text-sm">
+          <div className="w-full space-y-1 rounded-md bg-muted/50 px-4 py-3 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Asset Code</span>
               <span className="font-medium">{asset.assetCode}</span>
@@ -203,7 +179,6 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
   );
 }
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: AssetStatus }) {
   const variant =
     status === "Available"
@@ -213,20 +188,24 @@ function StatusBadge({ status }: { status: AssetStatus }) {
         : status === "In Repair"
           ? "destructive"
           : "outline";
+
   return <Badge variant={variant}>{status}</Badge>;
 }
 
-// ─── Assets Page ──────────────────────────────────────────────────────────────
 export default function Assets() {
-  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const managementApi = useManagementApi();
 
-  // Loading states only — no error states
+  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [locations, setLocations] = React.useState<Location[]>([]);
+  const [employees, setEmployees] = React.useState<Employee[]>([]);
+
   const [pageLoading, setPageLoading] = React.useState(true);
+  const [lookupLoading, setLookupLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [scanLoading, setScanLoading] = React.useState(false);
 
-  // Filters
   const [q, setQ] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<AssetStatus | "All">(
     "All",
@@ -235,60 +214,99 @@ export default function Assets() {
     "All",
   );
 
-  // Barcode scan
   const [scanValue, setScanValue] = React.useState("");
   const scanRef = React.useRef<HTMLInputElement | null>(null);
 
-  // Dialog / form state
   const [openForm, setOpenForm] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<AssetFormState>(emptyAssetForm);
   const [saveError, setSaveError] = React.useState<string | null>(null);
 
-  // Delete confirm
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
-
-  // QR dialog
   const [qrAsset, setQrAsset] = React.useState<Asset | null>(null);
 
-  // ── Load assets on mount ───────────────────────────────────────────────────
+  const lookupsLoadedRef = React.useRef(false);
+
   const loadAssets = React.useCallback(async () => {
+    if (!isLoaded) return;
+
+    if (!isSignedIn) {
+      setAssets([]);
+      setPageLoading(false);
+      return;
+    }
+
     setPageLoading(true);
     try {
-      const data = await fetchAssets();
-      setAssets(data);
-    } catch {
-      // silently fail — no UI error shown
+      const data = await fetchAssets(getToken);
+      setAssets(data ?? []);
+    } catch (err) {
+      console.error("loadAssets failed:", err);
+      setAssets([]);
     } finally {
       setPageLoading(false);
     }
-  }, []);
+  }, [isLoaded, isSignedIn, getToken]);
+
+  const loadLookups = React.useCallback(
+    async (force = false) => {
+      if (!isLoaded || !isSignedIn) {
+        setLocations([]);
+        setEmployees([]);
+        return;
+      }
+
+      if (lookupsLoadedRef.current && !force) return;
+
+      setLookupLoading(true);
+      try {
+        const data = await managementApi.loadAssetLookups();
+        setLocations(Array.isArray(data?.locations) ? data.locations : []);
+        setEmployees(Array.isArray(data?.employees) ? data.employees : []);
+        lookupsLoadedRef.current = true;
+      } catch (err) {
+        console.error("loadLookups failed:", err);
+        setLocations([]);
+        setEmployees([]);
+      } finally {
+        setLookupLoading(false);
+      }
+    },
+    [isLoaded, isSignedIn, managementApi],
+  );
 
   React.useEffect(() => {
     loadAssets();
   }, [loadAssets]);
 
   React.useEffect(() => {
+    if (openForm) {
+      loadLookups();
+    }
+  }, [openForm, loadLookups]);
+
+  React.useEffect(() => {
     scanRef.current?.focus();
   }, []);
 
-  // ── Filtered list (client-side) ────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
+
     return assets.filter((a) => {
       const matchText =
         !text ||
         `${a.assetCode} ${a.barcode ?? ""} ${a.serialNo} ${a.brand} ${a.model} ${a.location} ${a.assignedTo ?? ""}`
           .toLowerCase()
           .includes(text);
+
       const matchStatus = statusFilter === "All" || a.status === statusFilter;
       const matchCat =
         categoryFilter === "All" || a.category === categoryFilter;
+
       return matchText && matchStatus && matchCat;
     });
   }, [assets, q, statusFilter, categoryFilter]);
 
-  // ── Open add / edit form ───────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyAssetForm);
@@ -298,27 +316,40 @@ export default function Assets() {
 
   const openEdit = (asset: Asset) => {
     setEditingId(asset.id);
-    const { id, ...rest } = asset;
+
+    const matchingLocation = locations.find(
+      (loc) => loc.name?.trim() === asset.location?.trim(),
+    );
+
+    const matchingEmployee = employees.find(
+      (emp) => `${emp.empId} - ${emp.name}`.trim() === asset.assignedTo?.trim(),
+    );
+
     setForm({
-      ...rest,
-      barcode: rest.barcode ?? "",
-      assignedTo: rest.assignedTo ?? "",
-      purchaseDate: rest.purchaseDate ?? "",
-      warrantyEnd: rest.warrantyEnd ?? "",
+      assetCode: asset.assetCode ?? "",
+      barcode: asset.barcode ?? "",
+      category: asset.category ?? "Laptop",
+      brand: asset.brand ?? "",
+      model: asset.model ?? "",
+      serialNo: asset.serialNo ?? "",
+      status: asset.status ?? "Available",
+      locationId: matchingLocation ? String(matchingLocation.id) : "",
+      assignedToId: matchingEmployee ? String(matchingEmployee.id) : "",
+      purchaseDate: asset.purchaseDate ?? "",
+      warrantyEnd: asset.warrantyEnd ?? "",
     });
+
     setSaveError(null);
     setOpenForm(true);
   };
 
-  // ── Validate ───────────────────────────────────────────────────────────────
   const validateForm = (): string | null => {
     if (!form.assetCode.trim()) return "Asset code is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
-    if (!form.location.trim()) return "Location is required.";
+    if (!form.locationId.trim()) return "Location is required.";
     return null;
   };
 
-  // ── Save (create or update) ────────────────────────────────────────────────
   const save = async () => {
     const err = validateForm();
     if (err) {
@@ -326,52 +357,69 @@ export default function Assets() {
       return;
     }
 
+    if (!isLoaded || !isSignedIn) {
+      setSaveError("You are not signed in.");
+      return;
+    }
+
     setSaving(true);
     setSaveError(null);
+
     try {
       if (editingId) {
-        const updated = await updateAsset(editingId, form);
+        const updated = await updateAsset(getToken, editingId, form);
         setAssets((prev) =>
           prev.map((a) => (a.id === editingId ? updated : a)),
         );
       } else {
-        const created = await createAsset(form);
+        const created = await createAsset(getToken, form);
         setAssets((prev) => [created, ...prev]);
       }
+
       setOpenForm(false);
-    } catch {
+      setForm(emptyAssetForm);
+    } catch (e) {
+      console.error("save asset failed:", e);
       setSaveError("Failed to save asset. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Delete ─────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteId) return;
+
+    if (!isLoaded || !isSignedIn) {
+      setDeleteId(null);
+      return;
+    }
+
     setDeleteLoading(true);
     try {
-      await deleteAsset(deleteId);
+      await deleteAsset(getToken, deleteId);
       setAssets((prev) => prev.filter((a) => a.id !== deleteId));
       setDeleteId(null);
-    } catch {
+    } catch (e) {
+      console.error("delete asset failed:", e);
       setDeleteId(null);
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  // ── Barcode scan ───────────────────────────────────────────────────────────
   const findByBarcode = async (barcode: string) => {
     const code = barcode.trim();
     if (!code) return;
 
+    if (!isLoaded || !isSignedIn) return;
+
     setScanLoading(true);
     try {
-      const found = await fetchAssetByScan(code);
+      const found = await fetchAssetByScan(getToken, code);
+      await loadLookups();
       openEdit(found);
-    } catch {
-      // silently fail
+    } catch (e) {
+      console.error("scan failed:", e);
     } finally {
       setScanLoading(false);
     }
@@ -385,10 +433,8 @@ export default function Assets() {
     }
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Assets</h1>
@@ -396,13 +442,14 @@ export default function Assets() {
             Register, scan, and manage CIC IT assets.
           </p>
         </div>
+
         <div className="flex gap-2">
           <Button
             variant="outline"
             size="icon"
-            onClick={loadAssets}
+            onClick={() => loadAssets()}
             disabled={pageLoading}
-            title="Refresh"
+            title="Refresh Assets"
             type="button"
           >
             {pageLoading ? (
@@ -411,6 +458,7 @@ export default function Assets() {
               <RefreshCw className="h-4 w-4" />
             )}
           </Button>
+
           <Button onClick={openAdd} className="gap-2" type="button">
             <Plus className="h-4 w-4" />
             Add Asset
@@ -418,15 +466,15 @@ export default function Assets() {
         </div>
       </div>
 
-      {/* Barcode Scan Card */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
             <ScanLine className="h-4 w-4" />
             Barcode / QR Scan
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col md:flex-row gap-3 md:items-end">
+
+        <CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
           <div className="flex-1 space-y-1">
             <div className="text-xs text-muted-foreground">
               Scan barcode (barcode / serial / asset code) and press Enter.
@@ -440,6 +488,7 @@ export default function Assets() {
               disabled={scanLoading}
             />
           </div>
+
           <div className="flex gap-2">
             <Button
               type="button"
@@ -451,10 +500,11 @@ export default function Assets() {
               }}
             >
               {scanLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
               ) : null}
               Find
             </Button>
+
             <Button
               type="button"
               variant="outline"
@@ -466,11 +516,11 @@ export default function Assets() {
         </CardContent>
       </Card>
 
-      {/* Filters */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
+
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Search</div>
@@ -480,6 +530,7 @@ export default function Assets() {
               placeholder="asset code, barcode, serial, model, location..."
             />
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
             <Select
@@ -499,6 +550,7 @@ export default function Assets() {
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Category</div>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -518,7 +570,6 @@ export default function Assets() {
         </CardContent>
       </Card>
 
-      {/* Table */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
@@ -526,6 +577,7 @@ export default function Assets() {
             <span className="text-muted-foreground">({filtered.length})</span>
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="rounded-md border">
             <Table>
@@ -541,13 +593,14 @@ export default function Assets() {
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {pageLoading ? (
                   <TableRow>
                     <TableCell colSpan={8} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading assets…
+                        Loading assets...
                       </div>
                     </TableCell>
                   </TableRow>
@@ -555,7 +608,7 @@ export default function Assets() {
                   <TableRow>
                     <TableCell
                       colSpan={8}
-                      className="text-center text-muted-foreground py-10"
+                      className="py-10 text-center text-muted-foreground"
                     >
                       No assets found.
                     </TableCell>
@@ -596,15 +649,23 @@ export default function Assets() {
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
+
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEdit(a)}>
+                            <DropdownMenuItem
+                              onClick={async () => {
+                                await loadLookups();
+                                openEdit(a);
+                              }}
+                            >
                               <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
-                            {/* ── QR Code option ── */}
+
                             <DropdownMenuItem onClick={() => setQrAsset(a)}>
                               <QrCode className="mr-2 h-4 w-4" /> View QR Code
                             </DropdownMenuItem>
+
                             <DropdownMenuSeparator />
+
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => setDeleteId(a.id)}
@@ -623,7 +684,6 @@ export default function Assets() {
         </CardContent>
       </Card>
 
-      {/* Add / Edit Dialog */}
       <Dialog
         open={openForm}
         onOpenChange={(open) => {
@@ -649,6 +709,7 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">
                 Barcode (optional)
@@ -662,6 +723,7 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Category</div>
               <Select
@@ -681,6 +743,7 @@ export default function Assets() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Status</div>
               <Select
@@ -702,6 +765,7 @@ export default function Assets() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Brand</div>
               <Input
@@ -713,6 +777,7 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Model</div>
               <Input
@@ -724,6 +789,7 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Serial No *</div>
               <Input
@@ -735,30 +801,79 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
-            <div className="space-y-1 md:col-span-2">
+
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Location *</div>
-              <Input
-                value={form.location}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, location: e.target.value }))
+              <Select
+                value={form.locationId || ""}
+                onValueChange={(value) =>
+                  setForm((p) => ({ ...p, locationId: value }))
                 }
-                placeholder="HQ / IT / Room 02"
-                disabled={saving}
-              />
+                disabled={saving || lookupLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      lookupLoading ? "Loading locations..." : "Select location"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.length === 0 && !lookupLoading ? (
+                    <SelectItem value="__NO_LOCATION__" disabled>
+                      No locations available
+                    </SelectItem>
+                  ) : (
+                    locations.map((loc) => (
+                      <SelectItem key={loc.id} value={String(loc.id)}>
+                        {loc.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="space-y-1 md:col-span-2">
+
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">
                 Assigned To (optional)
               </div>
-              <Input
-                value={form.assignedTo ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, assignedTo: e.target.value }))
+              <Select
+                value={
+                  form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
                 }
-                placeholder="E1023 - Name"
-                disabled={saving}
-              />
+                onValueChange={(value) =>
+                  setForm((p) => ({
+                    ...p,
+                    assignedToId: value === "__NONE__" ? "" : value,
+                  }))
+                }
+                disabled={saving || lookupLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      lookupLoading ? "Loading employees..." : "Select employee"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__NONE__">Not Assigned</SelectItem>
+                  {employees.length === 0 && !lookupLoading ? (
+                    <SelectItem value="__NO_EMPLOYEE__" disabled>
+                      No employees available
+                    </SelectItem>
+                  ) : (
+                    employees.map((emp) => (
+                      <SelectItem key={emp.id} value={String(emp.id)}>
+                        {emp.empId} - {emp.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Purchase Date</div>
               <Input
@@ -770,6 +885,7 @@ export default function Assets() {
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Warranty End</div>
               <Input
@@ -792,6 +908,7 @@ export default function Assets() {
             >
               Cancel
             </Button>
+
             <Button onClick={save} disabled={saving} type="button">
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingId ? "Save Changes" : "Create Asset"}
@@ -800,7 +917,6 @@ export default function Assets() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
       <AlertDialog
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
@@ -813,6 +929,7 @@ export default function Assets() {
               removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteLoading} type="button">
               Cancel
@@ -831,7 +948,6 @@ export default function Assets() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* QR Code Dialog */}
       <QRDialog
         asset={qrAsset}
         open={!!qrAsset}
