@@ -1,3 +1,4 @@
+// src/pages/MaintenancePage.tsx
 import * as React from "react";
 import {
   Plus,
@@ -6,12 +7,10 @@ import {
   MoreHorizontal,
   CheckCircle2,
 } from "lucide-react";
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-
 import {
   Select,
   SelectContent,
@@ -19,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
 import {
   Table,
   TableBody,
@@ -28,7 +26,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
 import {
   Dialog,
   DialogContent,
@@ -36,7 +33,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,7 +43,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,24 +50,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import type { Asset } from "@/types";
-import { seedAssets } from "@/assets.seed";
-
+import type { Asset, Supplier } from "@/types";
 import type {
   Maintenance,
   MaintenanceFormState,
   MaintenancePriority,
   MaintenanceStatus,
 } from "@/types";
-
 import {
   emptyMaintenanceForm,
   maintenancePriorityOptions,
   maintenanceStatusOptions,
 } from "@/types";
+import { useMaintenanceApi } from "@/lib/maintainance-api";
+import { useAssetApi } from "@/lib/api";
 
-import { seedMaintenance } from "@/assets.seed";
-
+// ─── Badge helpers ────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: MaintenanceStatus }) {
   const variant =
     status === "Completed"
@@ -81,8 +74,7 @@ function StatusBadge({ status }: { status: MaintenanceStatus }) {
         ? "outline"
         : status === "In Progress"
           ? "default"
-          : "destructive"; // Open => make it stand out
-
+          : "destructive";
   return <Badge variant={variant}>{status}</Badge>;
 }
 
@@ -95,22 +87,28 @@ function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
         : priority === "Medium"
           ? "secondary"
           : "outline";
-
   return <Badge variant={variant}>{priority}</Badge>;
 }
 
-function nextTicketNo(existing: Maintenance[]): string {
-  // MT-0001 style
-  const nums = existing
-    .map((m) => Number(m.ticketNo.replace("MT-", "")))
-    .filter((n) => !Number.isNaN(n));
-  const next = (nums.length ? Math.max(...nums) : 0) + 1;
-  return `MT-${String(next).padStart(4, "0")}`;
-}
-
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function MaintenancePage() {
-  const [assets] = React.useState<Asset[]>(seedAssets);
-  const [rows, setRows] = React.useState<Maintenance[]>(seedMaintenance);
+  const {
+    getAll,
+    getAssets,
+    getSuppliers,
+    create,
+    update,
+    remove,
+    markCompleted,
+  } = useMaintenanceApi();
+
+  // ✅ Only updateStatus needed — fetches current asset and patches status cleanly
+  const { updateStatus: updateAssetStatus } = useAssetApi();
+
+  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
+  const [rows, setRows] = React.useState<Maintenance[]>([]);
+  const [loading, setLoading] = React.useState(false);
 
   // Filters
   const [q, setQ] = React.useState("");
@@ -126,33 +124,78 @@ export default function MaintenancePage() {
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] =
     React.useState<MaintenanceFormState>(emptyMaintenanceForm);
+  const [saving, setSaving] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
 
   // Delete confirm
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
 
+  // Duplicate asset warning
+  const [duplicateAssetId, setDuplicateAssetId] = React.useState<string | null>(
+    null,
+  );
+
+  // ── Fetch on mount ──────────────────────────────────────────────────────────
+  const fetchMaintenance = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const page = await getAll();
+      setRows(page.content);
+    } catch (e) {
+      console.error("Failed to load maintenance:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [getAll]);
+
+  React.useEffect(() => {
+    fetchMaintenance();
+  }, [fetchMaintenance]);
+
+  React.useEffect(() => {
+    getAssets()
+      .then((p) => setAssets(p.content))
+      .catch(() => {});
+  }, [getAssets]);
+
+  React.useEffect(() => {
+    getSuppliers()
+      .then(setSuppliers)
+      .catch(() => {});
+  }, [getSuppliers]);
+
+  // ── Client-side filter ──────────────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
     return rows.filter((m) => {
       const matchText =
         !text ||
-        `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""} ${m.supplier ?? ""}`
+        `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""} ${m.supplierName ?? ""}`
           .toLowerCase()
           .includes(text);
-
-      const matchStatus =
-        statusFilter === "All" ? true : m.status === statusFilter;
+      const matchStatus = statusFilter === "All" || m.status === statusFilter;
       const matchPriority =
-        priorityFilter === "All" ? true : m.priority === priorityFilter;
-
+        priorityFilter === "All" || m.priority === priorityFilter;
       return matchText && matchStatus && matchPriority;
     });
   }, [rows, q, statusFilter, priorityFilter]);
 
+  // ── Check if asset already has an active ticket ─────────────────────────────
+  const hasActiveTicket = (assetId: string, excludeId?: string | null) =>
+    rows.some(
+      (m) =>
+        m.assetId === assetId &&
+        m.id !== excludeId &&
+        m.status !== "Completed" &&
+        m.status !== "Cancelled",
+    );
+
+  // ── Dialog helpers ──────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
+    setFormError(null);
     setForm({
       ...emptyMaintenanceForm,
-      ticketNo: nextTicketNo(rows),
       reportedDate: new Date().toISOString().slice(0, 10),
     });
     setOpenForm(true);
@@ -160,79 +203,110 @@ export default function MaintenancePage() {
 
   const openEdit = (m: Maintenance) => {
     setEditingId(m.id);
-    const { id, ...rest } = m;
+    setFormError(null);
     setForm({
-      ...rest,
-      description: rest.description ?? "",
-      dueDate: rest.dueDate ?? "",
-      completedDate: rest.completedDate ?? "",
-      assignedTo: rest.assignedTo ?? "",
-      supplier: rest.supplier ?? "",
-      notes: rest.notes ?? "",
-      cost: rest.cost,
+      ticketNo: m.ticketNo,
+      assetId: m.assetId,
+      assetCode: m.assetCode,
+      supplierId: m.supplierId,
+      issueTitle: m.issueTitle,
+      description: m.description ?? "",
+      priority: m.priority,
+      status: m.status,
+      reportedDate: m.reportedDate,
+      dueDate: m.dueDate ?? "",
+      assignedTo: m.assignedTo ?? "",
+      cost: m.cost,
+      notes: m.notes ?? "",
     });
     setOpenForm(true);
   };
 
   const onAssetChange = (assetId: string) => {
-    const a = assets.find((x) => x.id === assetId);
-    setForm((p) => ({
-      ...p,
-      assetId,
-      assetCode: a?.assetCode ?? "",
-    }));
+    const a = assets.find((x) => String(x.id) === assetId);
+    setForm((p) => ({ ...p, assetId, assetCode: a?.assetCode ?? "" }));
   };
 
+  // ── Validate ────────────────────────────────────────────────────────────────
   const validate = (): string | null => {
-    if (!form.ticketNo.trim()) return "Ticket no is required.";
+    if (!form.ticketNo.trim()) return "Ticket No is required.";
     if (!form.assetId) return "Asset is required.";
+    if (!form.supplierId) return "Supplier is required.";
     if (!form.issueTitle.trim()) return "Issue title is required.";
     if (!form.reportedDate) return "Reported date is required.";
     return null;
   };
 
-  const save = () => {
+  // ── Save (create / update) ──────────────────────────────────────────────────
+  const save = async () => {
     const err = validate();
-    if (err) return alert(err);
-
-    // if completed, set completedDate if not set
-    const normalized: MaintenanceFormState =
-      form.status === "Completed" && !form.completedDate
-        ? { ...form, completedDate: new Date().toISOString().slice(0, 10) }
-        : form;
-
-    if (editingId) {
-      setRows((p) =>
-        p.map((x) =>
-          x.id === editingId ? { ...x, ...normalized, id: editingId } : x,
-        ),
-      );
-    } else {
-      setRows((p) => [{ id: crypto.randomUUID(), ...normalized }, ...p]);
+    if (err) {
+      setFormError(err);
+      return;
     }
-    setOpenForm(false);
+    setFormError(null);
+
+    // ✅ Block if asset already has an active open ticket
+    if (!editingId && hasActiveTicket(form.assetId)) {
+      setDuplicateAssetId(form.assetId);
+      return;
+    }
+
+    const isClosed = form.status === "Completed" || form.status === "Cancelled";
+
+    setSaving(true);
+    try {
+      if (editingId) {
+        const updated = await update(editingId, form);
+        setRows((p) => p.map((x) => (x.id === editingId ? updated : x)));
+      } else {
+        const created = await create(form);
+        setRows((p) => [created, ...p]);
+      }
+
+      // ✅ Update asset status: In Repair when open, Available when closed
+      await updateAssetStatus(
+        form.assetId,
+        isClosed ? "Available" : "In Repair",
+      );
+
+      setOpenForm(false);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to save ticket.";
+      setFormError(msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const confirmDelete = () => {
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  const confirmDelete = async () => {
     if (!deleteId) return;
-    setRows((p) => p.filter((x) => x.id !== deleteId));
-    setDeleteId(null);
+    try {
+      await remove(deleteId);
+      setRows((p) => p.filter((x) => x.id !== deleteId));
+    } catch (e) {
+      console.error("Failed to delete ticket:", e);
+    } finally {
+      setDeleteId(null);
+    }
   };
 
-  const markCompleted = (id: string) => {
-    setRows((p) =>
-      p.map((x) =>
-        x.id === id
-          ? {
-              ...x,
-              status: "Completed",
-              completedDate: new Date().toISOString().slice(0, 10),
-            }
-          : x,
-      ),
-    );
+  // ── Mark completed ──────────────────────────────────────────────────────────
+  const handleMarkCompleted = async (id: string) => {
+    const existing = rows.find((x) => x.id === id);
+    if (!existing) return;
+    try {
+      const updated = await markCompleted(id, existing);
+      setRows((p) => p.map((x) => (x.id === id ? updated : x)));
+      // ✅ Asset goes back to Available when ticket is completed
+      await updateAssetStatus(existing.assetId, "Available");
+    } catch (e) {
+      console.error("Failed to mark completed:", e);
+    }
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -243,10 +317,8 @@ export default function MaintenancePage() {
             Track issues, repairs, costs, and completion for IT assets.
           </p>
         </div>
-
         <Button onClick={openAdd} className="gap-2" type="button">
-          <Plus className="h-4 w-4" />
-          New Ticket
+          <Plus className="h-4 w-4" /> New Ticket
         </Button>
       </div>
 
@@ -255,7 +327,6 @@ export default function MaintenancePage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
-
         <CardContent className="grid gap-3 md:grid-cols-3">
           <div className="space-y-1 md:col-span-1">
             <div className="text-xs text-muted-foreground">Search</div>
@@ -265,7 +336,6 @@ export default function MaintenancePage() {
               placeholder="ticket, asset code, issue, supplier..."
             />
           </div>
-
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
             <Select
@@ -287,7 +357,6 @@ export default function MaintenancePage() {
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Priority</div>
             <Select
@@ -312,7 +381,7 @@ export default function MaintenancePage() {
         </CardContent>
       </Card>
 
-      {/* List */}
+      {/* Table */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
@@ -320,7 +389,6 @@ export default function MaintenancePage() {
             <span className="text-muted-foreground">({filtered.length})</span>
           </CardTitle>
         </CardHeader>
-
         <CardContent>
           <div className="rounded-md border">
             <Table>
@@ -336,9 +404,17 @@ export default function MaintenancePage() {
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-
               <TableBody>
-                {filtered.length === 0 ? (
+                {loading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
+                      className="py-10 text-center text-muted-foreground"
+                    >
+                      Loading…
+                    </TableCell>
+                  </TableRow>
+                ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -362,7 +438,9 @@ export default function MaintenancePage() {
                           {m.assignedTo
                             ? `Assigned: ${m.assignedTo}`
                             : "Unassigned"}
-                          {m.supplier ? ` • Supplier: ${m.supplier}` : ""}
+                          {m.supplierName
+                            ? ` • Supplier: ${m.supplierName}`
+                            : ""}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -380,34 +458,27 @@ export default function MaintenancePage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label="Actions"
-                              type="button"
-                            >
+                            <Button variant="ghost" size="icon" type="button">
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {m.status !== "Completed" && (
                               <DropdownMenuItem
-                                onClick={() => markCompleted(m.id)}
+                                onClick={() => handleMarkCompleted(m.id)}
                               >
-                                <CheckCircle2 className="mr-2 h-4 w-4" />
-                                Mark Completed
+                                <CheckCircle2 className="mr-2 h-4 w-4" /> Mark
+                                Completed
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => openEdit(m)}>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Edit
+                              <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => setDeleteId(m.id)}
                             >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -421,7 +492,7 @@ export default function MaintenancePage() {
         </CardContent>
       </Card>
 
-      {/* Add/Edit Dialog */}
+      {/* Add / Edit Dialog */}
       <Dialog open={openForm} onOpenChange={setOpenForm}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
@@ -430,8 +501,15 @@ export default function MaintenancePage() {
             </DialogTitle>
           </DialogHeader>
 
+          {/* ✅ Inline form error */}
+          {formError && (
+            <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
+              {formError}
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
+            <div className="space-y-1 md:col-span-2">
               <div className="text-xs text-muted-foreground">Ticket No *</div>
               <Input
                 value={form.ticketNo}
@@ -439,6 +517,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, ticketNo: e.target.value }))
                 }
                 placeholder="MT-0001"
+                disabled={!!editingId}
               />
             </div>
 
@@ -450,8 +529,34 @@ export default function MaintenancePage() {
                 </SelectTrigger>
                 <SelectContent>
                   {assets.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
+                    <SelectItem key={a.id} value={String(a.id)}>
                       {a.assetCode} • {a.brand} {a.model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* ✅ Supplier sends supplierId (Long) to backend */}
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Supplier *</div>
+              <Select
+                value={form.supplierId ? String(form.supplierId) : ""}
+                onValueChange={(v) =>
+                  setForm((p) => ({
+                    ...p,
+                    supplierId: v === "__none__" ? "" : v,
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— None —</SelectItem>
+                  {suppliers.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -558,17 +663,6 @@ export default function MaintenancePage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Supplier</div>
-              <Input
-                value={form.supplier ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, supplier: e.target.value }))
-                }
-                placeholder="Vendor name"
-              />
-            </div>
-
-            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Cost</div>
               <Input
                 type="number"
@@ -603,15 +697,40 @@ export default function MaintenancePage() {
               variant="outline"
               onClick={() => setOpenForm(false)}
               type="button"
+              disabled={saving}
             >
               Cancel
             </Button>
-            <Button onClick={save} type="button">
-              {editingId ? "Save Changes" : "Create Ticket"}
+            <Button onClick={save} type="button" disabled={saving}>
+              {saving
+                ? "Saving…"
+                : editingId
+                  ? "Save Changes"
+                  : "Create Ticket"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ✅ Duplicate asset active ticket warning */}
+      <AlertDialog
+        open={!!duplicateAssetId}
+        onOpenChange={(open) => !open && setDuplicateAssetId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Active Ticket Already Exists</AlertDialogTitle>
+            <AlertDialogDescription>
+              This asset already has an open or in-progress maintenance ticket.
+              Please complete or cancel the existing ticket before creating a
+              new one.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">OK</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Confirm */}
       <AlertDialog

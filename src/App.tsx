@@ -11,7 +11,8 @@ import Assets from "./Pages/Assets";
 import EmployeesPage from "./Pages/Employees";
 import MaintenancePage from "./Pages/Maintenance";
 import ReportsPage from "./Pages/Reports";
-import AuditLogsPage from "./Pages/AuditLogs";
+import AssetTransfer from "./Pages/AssetTransfer";
+import UnderConstructionPage from "./Pages/components/UnderConstructionPage";
 
 export default function App() {
   return (
@@ -35,7 +36,8 @@ export default function App() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />
         <Route path="reports" element={<ReportsPage />} />
-        <Route path="audit" element={<AuditLogsPage />} />
+        <Route path="assetTransfer" element={<AssetTransfer />} />
+        <Route path="settings" element={<UnderConstructionPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

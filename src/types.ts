@@ -43,8 +43,15 @@ export interface Asset {
     model: string;
     serialNo: string;
     status: AssetStatus;
+
+    // display values
     location: string;
     assignedTo?: string;
+
+    // actual IDs for update/transfer
+    locationId: string;
+    assignedToId?: string;
+
     purchaseDate?: string;
     warrantyEnd?: string;
 }
@@ -146,39 +153,57 @@ export const maintenancePriorityOptions: MaintenancePriority[] = [
     "Critical",
 ];
 
+// Keep assetId as a plain string on the frontend.
+// The API layer (api.ts) converts it to { id: number } before sending to backend,
+// and flattens it back to a string when receiving from backend.
+// In your types.ts — update these two types:
+
 export type Maintenance = {
     id: string;
     ticketNo: string;
     assetId: string;
     assetCode: string;
+    supplierId: string;       // ✅ replaces supplier name string
+    supplierName: string;     // ✅ display only, from backend response
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
     status: MaintenanceStatus;
     reportedDate: string;
     dueDate?: string;
-    completedDate?: string;
     assignedTo?: string;
-    supplier?: string;
     cost?: number;
     notes?: string;
 };
 
-export type MaintenanceFormState = Omit<Maintenance, "id">;
+export type MaintenanceFormState = {
+    ticketNo: string;
+    assetId: string;
+    assetCode: string;
+    supplierId: string;       // ✅ Long ID sent to backend
+    issueTitle: string;
+    description?: string;
+    priority: MaintenancePriority;
+    status: MaintenanceStatus;
+    reportedDate: string;
+    dueDate?: string;
+    assignedTo?: string;
+    cost?: number;
+    notes?: string;
+};
 
 export const emptyMaintenanceForm: MaintenanceFormState = {
     ticketNo: "",
     assetId: "",
     assetCode: "",
+    supplierId: "",           // ✅ was supplier: ""
     issueTitle: "",
     description: "",
     priority: "Medium",
     status: "Open",
-    reportedDate: new Date().toISOString().slice(0, 10),
+    reportedDate: "",
     dueDate: "",
-    completedDate: "",
     assignedTo: "",
-    supplier: "",
     cost: undefined,
     notes: "",
 };

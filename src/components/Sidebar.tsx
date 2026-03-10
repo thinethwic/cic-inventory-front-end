@@ -36,7 +36,7 @@ const navItems: NavItem[] = [
   { to: "/employees", label: "Employees", icon: Users },
   { to: "/maintenance", label: "Maintenance", icon: Wrench },
   { to: "/reports", label: "Reports", icon: FileBarChart2 },
-  { to: "/audit", label: "Audit Logs", icon: ShieldCheck },
+  { to: "/assetTransfer", label: "Asset Transfer", icon: ShieldCheck },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

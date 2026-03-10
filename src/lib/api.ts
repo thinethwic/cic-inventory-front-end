@@ -1,9 +1,12 @@
-// src/lib/api.ts
+// src/lib/asset-api.ts
+import * as React from "react";
+import { useAuth } from "@clerk/clerk-react";
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
-// ─── Base config ──────────────────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const ASSETS_ENDPOINT = `${BASE_URL}/api/v1/assets`;
+const JWT_TEMPLATE = "cic-inventory";
 
 // ─── Spring Boot page wrapper ─────────────────────────────────────────────────
 interface SpringPage<T> {
@@ -14,10 +17,11 @@ interface SpringPage<T> {
     size: number;
 }
 
-// ─── Raw response shape from backend ──────────────────────────────────────────
+// ─── Raw response shapes from backend ────────────────────────────────────────
 interface RawLocation {
     id?: number;
     name?: string;
+    code?: string;
 }
 
 interface RawEmployee {
@@ -56,6 +60,7 @@ const STATUS_TO_BACKEND: Record<string, string> = {
     Assigned: "ASSIGNED",
     "In Repair": "MAINTENANCE",
     Disposed: "RETIRED",
+    Retired: "RETIRED",
 };
 
 // ─── Category maps ────────────────────────────────────────────────────────────
@@ -79,22 +84,30 @@ const CATEGORY_TO_BACKEND: Record<string, string> = {
     Other: "OTHER",
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Field helpers ────────────────────────────────────────────────────────────
 function getLocationName(location?: string | RawLocation | null): string {
     if (!location) return "";
     if (typeof location === "string") return location;
     return location.name ?? "";
 }
 
+function getLocationId(location?: string | RawLocation | null): string {
+    if (!location || typeof location === "string") return "";
+    return location.id != null ? String(location.id) : "";
+}
+
 function getAssignedToLabel(assignedTo?: string | RawEmployee | null): string {
     if (!assignedTo) return "";
     if (typeof assignedTo === "string") return assignedTo;
-
     const empId = assignedTo.empId ?? "";
     const name = assignedTo.name ?? "";
-
     if (empId && name) return `${empId} - ${name}`;
     return name || empId || "";
+}
+
+function getAssignedToId(assignedTo?: string | RawEmployee | null): string {
+    if (!assignedTo || typeof assignedTo === "string") return "";
+    return assignedTo.id != null ? String(assignedTo.id) : "";
 }
 
 // ─── Transformers ─────────────────────────────────────────────────────────────
@@ -110,6 +123,8 @@ function toAsset(raw: RawAsset): Asset {
         status: STATUS_TO_FRONTEND[raw.status] ?? (raw.status as AssetStatus),
         location: getLocationName(raw.location),
         assignedTo: getAssignedToLabel(raw.assignedTo),
+        locationId: getLocationId(raw.location),
+        assignedToId: getAssignedToId(raw.assignedTo),
         purchaseDate: raw.purchaseDate ?? "",
         warrantyEnd: raw.warrantyEnd ?? "",
     };
@@ -124,11 +139,8 @@ function toRequestBody(form: AssetFormState) {
         model: form.model.trim(),
         serialNo: form.serialNo.trim(),
         status: STATUS_TO_BACKEND[form.status] ?? form.status,
-        // ✅ Send flat IDs — matches the updated AssetDTO (locationId / assignedToId)
         locationId: Number(form.locationId),
-        assignedToId: form.assignedToId?.trim()
-            ? Number(form.assignedToId)
-            : null,
+        assignedToId: form.assignedToId?.trim() ? Number(form.assignedToId) : null,
         purchaseDate: form.purchaseDate || null,
         warrantyEnd: form.warrantyEnd || null,
     };
@@ -140,13 +152,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
         const message = await res.text().catch(() => `HTTP ${res.status}`);
         throw new Error(message || `Request failed with status ${res.status}`);
     }
-
     if (res.status === 204) return undefined as T;
-
     return res.json() as Promise<T>;
 }
 
-// ─── Clerk auth integration ───────────────────────────────────────────────────
+// ─── Clerk auth ───────────────────────────────────────────────────────────────
 export type GetTokenFn = (opts?: { template?: string }) => Promise<string | null>;
 
 const defaultHeaders = {
@@ -158,96 +168,171 @@ async function authFetch(
     getToken: GetTokenFn,
     url: string,
     init: RequestInit = {},
-    template = "cic-inventory",
+    template = JWT_TEMPLATE,
 ) {
     const token = await getToken({ template });
-    console.log(token)
     if (!token) throw new Error("No auth token (user not signed in)");
-
-    const headers = {
-        ...defaultHeaders,
-        ...(init.headers ?? {}),
-        Authorization: `Bearer ${token}`,
-    };
-
-    return fetch(url, { ...init, headers });
+    return fetch(url, {
+        ...init,
+        headers: {
+            ...defaultHeaders,
+            ...(init.headers ?? {}),
+            Authorization: `Bearer ${token}`,
+        },
+    });
 }
 
-// ─── API functions ────────────────────────────────────────────────────────────
+// ─── Existing plain functions (kept for backward compatibility) ───────────────
 export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
-    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?page=0&size=200`, {
-        method: "GET",
-    });
-
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?size=1000`);
     const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
-
-    if (Array.isArray(data)) {
-        return data.map(toAsset);
-    }
-
-    return Array.isArray(data.content) ? data.content.map(toAsset) : [];
+    if (Array.isArray(data)) return data.map(toAsset);
+    return (data.content ?? []).map(toAsset);
 }
 
-export async function fetchAssetById(
-    getToken: GetTokenFn,
-    id: string,
-): Promise<Asset> {
-    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
-        method: "GET",
-    });
-
+export async function fetchAssetByScan(getToken: GetTokenFn, code: string): Promise<Asset> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`);
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-export async function fetchAssetByScan(
-    getToken: GetTokenFn,
-    code: string,
-): Promise<Asset> {
-    const res = await authFetch(
-        getToken,
-        `${ASSETS_ENDPOINT}/scan?q=${encodeURIComponent(code)}`,
-        { method: "GET" },
-    );
-
-    const raw = await handleResponse<RawAsset>(res);
-    return toAsset(raw);
-}
-
-export async function createAsset(
-    getToken: GetTokenFn,
-    data: AssetFormState,
-): Promise<Asset> {
+export async function createAsset(getToken: GetTokenFn, data: AssetFormState): Promise<Asset> {
     const res = await authFetch(getToken, ASSETS_ENDPOINT, {
         method: "POST",
         body: JSON.stringify(toRequestBody(data)),
     });
-
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-export async function updateAsset(
-    getToken: GetTokenFn,
-    id: string,
-    data: AssetFormState,
-): Promise<Asset> {
+export async function updateAsset(getToken: GetTokenFn, id: string, data: AssetFormState): Promise<Asset> {
     const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
         method: "PUT",
         body: JSON.stringify(toRequestBody(data)),
     });
-
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-export async function deleteAsset(
-    getToken: GetTokenFn,
-    id: string,
-): Promise<void> {
-    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
-        method: "DELETE",
-    });
+export async function deleteAsset(getToken: GetTokenFn, id: string): Promise<void> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, { method: "DELETE" });
+    await handleResponse<void>(res);
+}
 
-    return handleResponse<void>(res);
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+export function useAssetApi() {
+    const { getToken } = useAuth();
+
+    const withToken = React.useCallback(
+        async <T,>(fn: (token: string) => Promise<T>): Promise<T> => {
+            const token = await getToken({ template: JWT_TEMPLATE });
+            if (!token) throw new Error("Not authenticated");
+            return fn(token);
+        },
+        [getToken],
+    );
+
+    const getAll = React.useCallback(
+        (page = 0, size = 1000) =>
+            withToken(async (token) => {
+                const res = await fetch(`${ASSETS_ENDPOINT}?page=${page}&size=${size}`, {
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                });
+                const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
+                return Array.isArray(data) ? data.map(toAsset) : (data.content ?? []).map(toAsset);
+            }),
+        [withToken],
+    );
+
+    const getByScan = React.useCallback(
+        (code: string) =>
+            withToken(async (token) => {
+                const res = await fetch(`${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`, {
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                });
+                const raw = await handleResponse<RawAsset>(res);
+                return toAsset(raw);
+            }),
+        [withToken],
+    );
+
+    const create = React.useCallback(
+        (form: AssetFormState) =>
+            withToken(async (token) => {
+                const res = await fetch(ASSETS_ENDPOINT, {
+                    method: "POST",
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                    body: JSON.stringify(toRequestBody(form)),
+                });
+                const raw = await handleResponse<RawAsset>(res);
+                return toAsset(raw);
+            }),
+        [withToken],
+    );
+
+    const update = React.useCallback(
+        (id: string, form: AssetFormState) =>
+            withToken(async (token) => {
+                const res = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+                    method: "PUT",
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                    body: JSON.stringify(toRequestBody(form)),
+                });
+                const raw = await handleResponse<RawAsset>(res);
+                return toAsset(raw);
+            }),
+        [withToken],
+    );
+
+    // ✅ NEW: updateStatus — fetches current asset then patches only the status
+    const updateStatus = React.useCallback(
+        (id: string, status: AssetStatus) =>
+            withToken(async (token) => {
+                // Step 1: fetch current asset to preserve all existing fields
+                const getRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                });
+                const raw = await handleResponse<RawAsset>(getRes);
+                const current = toAsset(raw);
+
+                // Step 2: build full AssetFormState with only status changed
+                const form: AssetFormState = {
+                    assetCode: current.assetCode,
+                    barcode: current.barcode ?? "",
+                    category: current.category,
+                    brand: current.brand,
+                    model: current.model,
+                    serialNo: current.serialNo,
+                    status,                        // ✅ only this field changes
+                    locationId: current.locationId,
+                    assignedToId: current.assignedToId ?? "",
+                    purchaseDate: current.purchaseDate ?? "",
+                    warrantyEnd: current.warrantyEnd ?? "",
+                };
+
+                // Step 3: PUT the full object back
+                const putRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+                    method: "PUT",
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                    body: JSON.stringify(toRequestBody(form)),
+                });
+                const updated = await handleResponse<RawAsset>(putRes);
+                return toAsset(updated);
+            }),
+        [withToken],
+    );
+
+    const remove = React.useCallback(
+        (id: string) =>
+            withToken(async (token) => {
+                const res = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
+                    method: "DELETE",
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                });
+                await handleResponse<void>(res);
+            }),
+        [withToken],
+    );
+
+    return { getAll, getByScan, create, update, updateStatus, remove };
 }

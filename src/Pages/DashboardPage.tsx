@@ -10,6 +10,8 @@ import {
   QrCode,
   FileDown,
   Loader2,
+  Repeat,
+  Clipboard,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,57 +28,94 @@ import {
 } from "@/components/ui/table";
 import { Link } from "react-router-dom";
 
-// ✅ IMPORTANT: use the auth-enabled fetchAssets(getToken) version
-// If your file is src/api.ts then use: import { fetchAssets } from "@/api";
 import { fetchAssets } from "@/lib/api";
-
+import { fetchAssetTransfers } from "@/lib/asset-transfer-api";
+import { useMaintenanceApi } from "@/lib/maintainance-api";
 import type { Asset } from "@/types";
+import type { Maintenance } from "@/types";
+import type { AssetTransferResponse } from "@/lib/asset-transfer-api";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Unified Activity type ────────────────────────────────────────────────────
+type ActivityStatus = "Success" | "Pending" | "In Progress" | "Cancelled";
+
 type Activity = {
   id: string;
   action: string;
   assetCode: string;
-  by: string;
+  detail: string;
   time: string;
-  status: "Success" | "Pending" | "Failed";
+  rawDate: Date;
+  status: ActivityStatus;
+  icon: "transfer" | "maintenance";
 };
 
-// ─── Static data (unchanged) ──────────────────────────────────────────────────
-const recentActivity: Activity[] = [
-  {
-    id: "1",
-    action: "Assigned asset",
-    assetCode: "CIC-IT-LAP-0021",
-    by: "IT Admin",
-    time: "Today 09:20",
-    status: "Success",
-  },
-  {
-    id: "2",
-    action: "Maintenance started",
-    assetCode: "CIC-IT-PRN-0007",
-    by: "Technician",
-    time: "Yesterday 16:10",
-    status: "Pending",
-  },
-  {
-    id: "3",
-    action: "Transferred asset",
-    assetCode: "CIC-IT-LAP-0014",
-    by: "IT Admin",
-    time: "Yesterday 11:05",
-    status: "Success",
-  },
-];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
 
-function statusBadge(status: Activity["status"]) {
-  if (status === "Success") return <Badge>Success</Badge>;
-  if (status === "Pending") return <Badge variant="secondary">Pending</Badge>;
-  return <Badge variant="destructive">Failed</Badge>;
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
 }
 
-// ─── KPI stat derived from assets ────────────────────────────────────────────
+function transferToActivity(t: AssetTransferResponse): Activity {
+  const typeLabel =
+    t.transferType === "employee"
+      ? "Employee Transfer"
+      : t.transferType === "location"
+        ? "Location Transfer"
+        : "Employee + Location Transfer";
+
+  return {
+    id: `transfer-${t.id}`,
+    action: typeLabel,
+    assetCode: t.asset.assetCode,
+    detail: t.reason || `${t.asset.brand} ${t.asset.model}`,
+    time: formatTime(new Date(t.createdAt)),
+    rawDate: new Date(t.createdAt),
+    status: "Success",
+    icon: "transfer",
+  };
+}
+
+function maintenanceToActivity(m: Maintenance): Activity {
+  const status: ActivityStatus =
+    m.status === "Completed"
+      ? "Success"
+      : m.status === "Cancelled"
+        ? "Cancelled"
+        : m.status === "In Progress"
+          ? "In Progress"
+          : "Pending";
+
+  return {
+    id: `maintenance-${m.id}`,
+    action: "Maintenance Ticket",
+    assetCode: m.assetCode,
+    detail: m.issueTitle,
+    time: formatTime(new Date(m.reportedDate)),
+    rawDate: new Date(m.reportedDate),
+    status,
+    icon: "maintenance",
+  };
+}
+
+function StatusBadge({ status }: { status: ActivityStatus }) {
+  if (status === "Success") return <Badge>Success</Badge>;
+  if (status === "Pending") return <Badge variant="secondary">Pending</Badge>;
+  if (status === "In Progress")
+    return <Badge variant="outline">In Progress</Badge>;
+  return <Badge variant="destructive">Cancelled</Badge>;
+}
+
+// ─── KPI helpers ──────────────────────────────────────────────────────────────
 interface KpiStats {
   total: number;
   assigned: number;
@@ -93,7 +132,6 @@ function computeStats(assets: Asset[]): KpiStats {
   };
 }
 
-// ─── Warranty expiring: assets whose warrantyEnd is within 60 days ────────────
 function getWarrantyExpiring(assets: Asset[]) {
   const today = new Date();
   return assets
@@ -121,31 +159,26 @@ function getWarrantyExpiring(assets: Asset[]) {
 export default function DashboardPage() {
   const { user } = useUser();
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { getAll: getAllMaintenance } = useMaintenanceApi();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [activity, setActivity] = React.useState<Activity[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [activityLoading, setActivityLoading] = React.useState(true);
 
-  // ✅ Clerk-auth safe load (api.ts injects Bearer token internally)
+  // ── Fetch assets ────────────────────────────────────────────────────────────
   React.useEffect(() => {
     let cancelled = false;
+    if (!isLoaded) return;
 
     const load = async () => {
-      // wait for Clerk
-      if (!isLoaded) return;
-
-      // not signed in -> clear
       if (!isSignedIn) {
-        if (!cancelled) {
-          setAssets([]);
-          setLoading(false);
-        }
+        setAssets([]);
+        setLoading(false);
         return;
       }
-
-      if (!cancelled) setLoading(true);
-
+      setLoading(true);
       try {
-        // ✅ NEW: just pass getToken (no manual token building here)
         const data = await fetchAssets(getToken);
         if (!cancelled) setAssets(data);
       } catch (err) {
@@ -156,13 +189,54 @@ export default function DashboardPage() {
       }
     };
 
-    load();
-
+    void load();
     return () => {
       cancelled = true;
     };
   }, [isLoaded, isSignedIn, getToken]);
 
+  // ── Fetch activity: transfers + maintenance ─────────────────────────────────
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!isLoaded || !isSignedIn) return;
+
+    const loadActivity = async () => {
+      setActivityLoading(true);
+      try {
+        // Fetch both in parallel
+        const [transferPage, maintenancePage] = await Promise.all([
+          fetchAssetTransfers(getToken, 0, 20),
+          getAllMaintenance(0, 20),
+        ]);
+
+        if (cancelled) return;
+
+        // Convert both to unified Activity shape
+        const transferActivities = transferPage.content.map(transferToActivity);
+        const maintenanceActivities = maintenancePage.content.map(
+          maintenanceToActivity,
+        );
+
+        // Merge, sort by date descending, take latest 10
+        const merged = [...transferActivities, ...maintenanceActivities]
+          .sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
+          .slice(0, 10);
+
+        setActivity(merged);
+      } catch (err) {
+        console.error("Failed to load activity:", err);
+      } finally {
+        if (!cancelled) setActivityLoading(false);
+      }
+    };
+
+    void loadActivity();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, getToken, getAllMaintenance]);
+
+  // ── Derived ─────────────────────────────────────────────────────────────────
   const stats = React.useMemo(() => computeStats(assets), [assets]);
   const warrantyExpiring = React.useMemo(
     () => getWarrantyExpiring(assets),
@@ -176,6 +250,7 @@ export default function DashboardPage() {
     { label: "Disposed", value: stats.disposed, icon: ShieldCheck },
   ];
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -222,26 +297,26 @@ export default function DashboardPage() {
         <CardContent className="flex flex-wrap gap-2">
           <Button asChild className="gap-2" type="button">
             <Link to="/assets">
-              <ArrowUpRight className="h-4 w-4" />
-              Assign Asset
+              <ArrowUpRight className="h-4 w-4" /> Assign Asset
             </Link>
           </Button>
-
           <Button asChild variant="secondary" className="gap-2" type="button">
             <Link to="/maintenance">
-              <Wrench className="h-4 w-4" />
-              Add Maintenance
+              <Wrench className="h-4 w-4" /> Add Maintenance
             </Link>
           </Button>
-
-          <Button variant="outline" className="gap-2" type="button">
-            <QrCode className="h-4 w-4" />
-            Print QR Labels
+          <Button asChild variant="outline" className="gap-2" type="button">
+            <Link to="/transfers">
+              <Repeat className="h-4 w-4" /> Transfer Asset
+            </Link>
           </Button>
-
           <Button variant="outline" className="gap-2" type="button">
-            <FileDown className="h-4 w-4" />
-            Export Report
+            <QrCode className="h-4 w-4" /> Print QR Labels
+          </Button>
+          <Button asChild variant="outline" className="gap-2" type="button">
+            <Link to="/reports">
+              <FileDown className="h-4 w-4" /> Export Report
+            </Link>
           </Button>
         </CardContent>
       </Card>
@@ -253,42 +328,69 @@ export default function DashboardPage() {
             <CardTitle className="text-base">Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Asset</TableHead>
-                  <TableHead>By</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead className="text-right">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentActivity.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">{a.action}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {a.assetCode}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {a.by}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {a.time}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {statusBadge(a.status)}
-                    </TableCell>
+            {activityLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : activity.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                No recent activity found.
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Asset</TableHead>
+                    <TableHead>Detail</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {activity.map((a) => (
+                    <TableRow key={a.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {a.icon === "transfer" ? (
+                            <Repeat className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span className="text-sm font-medium">
+                            {a.action}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-xs">
+                        {a.assetCode}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
+                        {a.detail}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {a.time}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <StatusBadge status={a.status} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
 
             <Separator className="my-4" />
-
-            <div className="flex justify-end">
-              <Button variant="ghost" className="gap-2" type="button">
-                View all logs <ArrowUpRight className="h-4 w-4" />
+            <div className="flex justify-end gap-2">
+              <Button asChild variant="ghost" className="gap-2" type="button">
+                <Link to="/transfers">
+                  View transfers <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="ghost" className="gap-2" type="button">
+                <Link to="/maintenance">
+                  View tickets <ArrowUpRight className="h-4 w-4" />
+                </Link>
               </Button>
             </div>
           </CardContent>
@@ -325,7 +427,6 @@ export default function DashboardPage() {
                 </div>
               ))
             )}
-
             <Button variant="outline" className="w-full" type="button">
               View Warranty Report
             </Button>
