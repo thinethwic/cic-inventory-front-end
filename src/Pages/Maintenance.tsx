@@ -272,7 +272,6 @@ export default function MaintenancePage() {
         // On create, backend generates ticketNo
         const createPayload = {
           ...form,
-          ticketNo: undefined,
         };
         const created = await create(createPayload as MaintenanceFormState);
         setRows((p) => [created, ...p]);
