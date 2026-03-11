@@ -17,7 +17,7 @@ interface SpringPage<T> {
     size: number;
 }
 
-// ─── Raw response shapes from backend ────────────────────────────────────────
+// ─── Raw response shapes ──────────────────────────────────────────────────────
 interface RawLocation {
     id?: number;
     name?: string;
@@ -45,6 +45,23 @@ interface RawAsset {
     warrantyEnd?: string | null;
     createdAt?: string;
     updatedAt?: string;
+}
+
+// ─── Public types ─────────────────────────────────────────────────────────────
+export interface FetchAssetsParams {
+    page?: number;
+    size?: number;
+    search?: string;
+    status?: string;
+    category?: string;
+}
+
+export interface AssetsPage {
+    content: Asset[];
+    totalElements: number;
+    totalPages: number;
+    number: number;
+    size: number;
 }
 
 // ─── Status maps ──────────────────────────────────────────────────────────────
@@ -146,6 +163,18 @@ function toRequestBody(form: AssetFormState) {
     };
 }
 
+// ─── Query-string builder ─────────────────────────────────────────────────────
+function buildPageParams(params: FetchAssetsParams): URLSearchParams {
+    const { page = 0, size = 25, search, status, category } = params;
+    const qs = new URLSearchParams();
+    qs.set("page", String(page));
+    qs.set("size", String(size));
+    if (search?.trim()) qs.set("search", search.trim());
+    if (status && status !== "All") qs.set("status", STATUS_TO_BACKEND[status] ?? status);
+    if (category && category !== "All") qs.set("category", CATEGORY_TO_BACKEND[category] ?? category);
+    return qs;
+}
+
 // ─── Response helper ──────────────────────────────────────────────────────────
 async function handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
@@ -156,7 +185,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     return res.json() as Promise<T>;
 }
 
-// ─── Clerk auth ───────────────────────────────────────────────────────────────
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
 export type GetTokenFn = (opts?: { template?: string }) => Promise<string | null>;
 
 const defaultHeaders = {
@@ -182,7 +211,8 @@ async function authFetch(
     });
 }
 
-// ─── Existing plain functions (kept for backward compatibility) ───────────────
+// ─── Standalone exports (backward compatible) ─────────────────────────────────
+/** @deprecated Use the useAssetApi hook instead. */
 export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
     const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?size=1000`);
     const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
@@ -190,13 +220,41 @@ export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
     return (data.content ?? []).map(toAsset);
 }
 
-export async function fetchAssetByScan(getToken: GetTokenFn, code: string): Promise<Asset> {
-    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`);
+/** @deprecated Use the useAssetApi hook instead. */
+export async function fetchAssetsPage(
+    getToken: GetTokenFn,
+    params: FetchAssetsParams = {},
+): Promise<AssetsPage> {
+    const qs = buildPageParams(params);
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?${qs.toString()}`);
+    const data = await handleResponse<SpringPage<RawAsset>>(res);
+    return {
+        content: (data.content ?? []).map(toAsset),
+        totalElements: data.totalElements ?? 0,
+        totalPages: data.totalPages ?? 1,
+        number: data.number ?? 0,
+        size: data.size ?? (params.size ?? 25),
+    };
+}
+
+/** @deprecated Use the useAssetApi hook instead. */
+export async function fetchAssetByScan(
+    getToken: GetTokenFn,
+    code: string,
+): Promise<Asset> {
+    const res = await authFetch(
+        getToken,
+        `${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`,
+    );
     const raw = await handleResponse<RawAsset>(res);
     return toAsset(raw);
 }
 
-export async function createAsset(getToken: GetTokenFn, data: AssetFormState): Promise<Asset> {
+/** @deprecated Use the useAssetApi hook instead. */
+export async function createAsset(
+    getToken: GetTokenFn,
+    data: AssetFormState,
+): Promise<Asset> {
     const res = await authFetch(getToken, ASSETS_ENDPOINT, {
         method: "POST",
         body: JSON.stringify(toRequestBody(data)),
@@ -205,7 +263,12 @@ export async function createAsset(getToken: GetTokenFn, data: AssetFormState): P
     return toAsset(raw);
 }
 
-export async function updateAsset(getToken: GetTokenFn, id: string, data: AssetFormState): Promise<Asset> {
+/** @deprecated Use the useAssetApi hook instead. */
+export async function updateAsset(
+    getToken: GetTokenFn,
+    id: string,
+    data: AssetFormState,
+): Promise<Asset> {
     const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
         method: "PUT",
         body: JSON.stringify(toRequestBody(data)),
@@ -214,8 +277,14 @@ export async function updateAsset(getToken: GetTokenFn, id: string, data: AssetF
     return toAsset(raw);
 }
 
-export async function deleteAsset(getToken: GetTokenFn, id: string): Promise<void> {
-    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, { method: "DELETE" });
+/** @deprecated Use the useAssetApi hook instead. */
+export async function deleteAsset(
+    getToken: GetTokenFn,
+    id: string,
+): Promise<void> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/${id}`, {
+        method: "DELETE",
+    });
     await handleResponse<void>(res);
 }
 
@@ -223,23 +292,37 @@ export async function deleteAsset(getToken: GetTokenFn, id: string): Promise<voi
 export function useAssetApi() {
     const { getToken } = useAuth();
 
+    // ✅ Ref keeps getToken current without triggering re-renders
+    const getTokenRef = React.useRef(getToken);
+    React.useLayoutEffect(() => {
+        getTokenRef.current = getToken;
+    });
+
+    // ✅ Empty deps — never changes reference
     const withToken = React.useCallback(
         async <T,>(fn: (token: string) => Promise<T>): Promise<T> => {
-            const token = await getToken({ template: JWT_TEMPLATE });
+            const token = await getTokenRef.current({ template: JWT_TEMPLATE });
             if (!token) throw new Error("Not authenticated");
             return fn(token);
         },
-        [getToken],
+        [],
     );
 
-    const getAll = React.useCallback(
-        (page = 0, size = 1000) =>
+    const getPage = React.useCallback(
+        (params: FetchAssetsParams = {}) =>
             withToken(async (token) => {
-                const res = await fetch(`${ASSETS_ENDPOINT}?page=${page}&size=${size}`, {
+                const qs = buildPageParams(params);
+                const res = await fetch(`${ASSETS_ENDPOINT}?${qs.toString()}`, {
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
                 });
-                const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
-                return Array.isArray(data) ? data.map(toAsset) : (data.content ?? []).map(toAsset);
+                const data = await handleResponse<SpringPage<RawAsset>>(res);
+                return {
+                    content: (data.content ?? []).map(toAsset),
+                    totalElements: data.totalElements ?? 0,
+                    totalPages: data.totalPages ?? 1,
+                    number: data.number ?? 0,
+                    size: data.size ?? (params.size ?? 25),
+                } satisfies AssetsPage;
             }),
         [withToken],
     );
@@ -247,9 +330,10 @@ export function useAssetApi() {
     const getByScan = React.useCallback(
         (code: string) =>
             withToken(async (token) => {
-                const res = await fetch(`${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`, {
-                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
-                });
+                const res = await fetch(
+                    `${ASSETS_ENDPOINT}/scan/${encodeURIComponent(code)}`,
+                    { headers: { ...defaultHeaders, Authorization: `Bearer ${token}` } },
+                );
                 const raw = await handleResponse<RawAsset>(res);
                 return toAsset(raw);
             }),
@@ -284,18 +368,15 @@ export function useAssetApi() {
         [withToken],
     );
 
-    // ✅ NEW: updateStatus — fetches current asset then patches only the status
     const updateStatus = React.useCallback(
         (id: string, status: AssetStatus) =>
             withToken(async (token) => {
-                // Step 1: fetch current asset to preserve all existing fields
                 const getRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
                 });
                 const raw = await handleResponse<RawAsset>(getRes);
                 const current = toAsset(raw);
 
-                // Step 2: build full AssetFormState with only status changed
                 const form: AssetFormState = {
                     assetCode: current.assetCode,
                     barcode: current.barcode ?? "",
@@ -303,14 +384,13 @@ export function useAssetApi() {
                     brand: current.brand,
                     model: current.model,
                     serialNo: current.serialNo,
-                    status,                        // ✅ only this field changes
+                    status,
                     locationId: current.locationId,
                     assignedToId: current.assignedToId ?? "",
                     purchaseDate: current.purchaseDate ?? "",
                     warrantyEnd: current.warrantyEnd ?? "",
                 };
 
-                // Step 3: PUT the full object back
                 const putRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     method: "PUT",
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
@@ -318,6 +398,21 @@ export function useAssetApi() {
                 });
                 const updated = await handleResponse<RawAsset>(putRes);
                 return toAsset(updated);
+            }),
+        [withToken],
+    );
+
+    /** @deprecated Use getPage instead. */
+    const getAll = React.useCallback(
+        (page = 0, size = 1000) =>
+            withToken(async (token) => {
+                const res = await fetch(`${ASSETS_ENDPOINT}?page=${page}&size=${size}`, {
+                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+                });
+                const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
+                return Array.isArray(data)
+                    ? data.map(toAsset)
+                    : (data.content ?? []).map(toAsset);
             }),
         [withToken],
     );
@@ -334,5 +429,5 @@ export function useAssetApi() {
         [withToken],
     );
 
-    return { getAll, getByScan, create, update, updateStatus, remove };
+    return { getPage, getAll, getByScan, create, update, updateStatus, remove };
 }

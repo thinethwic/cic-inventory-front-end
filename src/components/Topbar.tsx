@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { ModeToggle } from "@/components/shared/mode-toggle";
 
 export default function Topbar() {
   return (
@@ -13,6 +14,8 @@ export default function Topbar() {
           placeholder="Search assets, serial, employee..."
         />
       </div>
+
+      <ModeToggle />
     </header>
   );
 }

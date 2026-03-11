@@ -107,20 +107,6 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
 }
 
 // ─── EmployeesTab ─────────────────────────────────────────────────────────────
-//
-// Backend Employee entity shape (what the API returns):
-//   id             → Long (number)
-//   empId          → String
-//   name           → String
-//   department     → { id, name, code, ... }   ← nested object, NOT a flat string
-//   location       → { id, name, code, ... }   ← nested object, NOT a flat string
-//   phone_no       → String
-//   email          → String
-//   employeeStatus → "ACTIVE" | "INACTIVE"
-//
-// What we POST/PUT (EmployeePayload):
-//   department  → { id: number }   ← Spring resolves by FK
-//   location    → { id: number }   ← Spring resolves by FK
 
 export interface EmployeesTabProps {
   employees: Employee[];
@@ -131,16 +117,27 @@ export interface EmployeesTabProps {
   onDelete: (id: number, label: string) => void;
 }
 
-// Local form state — flat IDs for the selects, resolved to nested objects on submit
+// Local form state
+// empId stays here only for display in edit mode / readonly display.
+// On create, backend generates it.
 type EmployeeFormState = {
   empId: string;
   name: string;
-  departmentId: string; // select value (string for the Select component)
-  locationId: string; // select value
+  departmentId: string;
+  locationId: string;
   phone_no: string;
   email: string;
   employeeStatus: "ACTIVE" | "INACTIVE";
 };
+
+export interface EmployeesTabProps {
+  employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+  departments: Department[];
+  locations: Location[];
+  loading: boolean;
+  onDelete: (id: number, label: string) => void;
+}
 
 export function EmployeesTab({
   employees,
@@ -177,7 +174,6 @@ export function EmployeesTab({
 
   const [form, setForm] = React.useState<EmployeeFormState>(blankForm);
 
-  // Filter — employee.department and employee.location are nested objects from backend
   const filtered = React.useMemo(() => {
     const t = q.trim().toLowerCase();
     return employees.filter((e) => {
@@ -186,15 +182,22 @@ export function EmployeesTab({
         !`${e.empId} ${e.name} ${e.email ?? ""} ${e.phone_no ?? ""}`
           .toLowerCase()
           .includes(t)
-      )
+      ) {
         return false;
-      // department and location come back as objects: { id, name, code }
-      if (deptFilter !== "All" && String(e.department?.id) !== deptFilter)
+      }
+
+      if (deptFilter !== "All" && String(e.department?.id) !== deptFilter) {
         return false;
-      if (locFilter !== "All" && String(e.location?.id) !== locFilter)
+      }
+
+      if (locFilter !== "All" && String(e.location?.id) !== locFilter) {
         return false;
-      if (statusFilter !== "All" && e.employeeStatus !== statusFilter)
+      }
+
+      if (statusFilter !== "All" && e.employeeStatus !== statusFilter) {
         return false;
+      }
+
       return true;
     });
   }, [employees, q, deptFilter, locFilter, statusFilter]);
@@ -208,8 +211,8 @@ export function EmployeesTab({
   const openEdit = (e: Employee) => {
     setEditing(e);
     setForm({
-      empId: e.empId,
-      name: e.name,
+      empId: e.empId ?? "",
+      name: e.name ?? "",
       departmentId: String(e.department?.id ?? ""),
       locationId: String(e.location?.id ?? ""),
       phone_no: e.phone_no ?? "",
@@ -220,33 +223,44 @@ export function EmployeesTab({
   };
 
   const save = async () => {
-    if (!form.empId.trim()) return alert("Employee ID is required.");
     if (!form.name.trim()) return alert("Name is required.");
     if (!form.departmentId) return alert("Department is required.");
     if (!form.locationId) return alert("Location is required.");
 
-    // Build the payload the backend expects:
-    // department and location must be nested { id } objects (Spring resolves FK)
-    const payload: EmployeePayload = {
-      empId: form.empId,
-      name: form.name,
-      department: { id: Number(form.departmentId) },
-      location: { id: Number(form.locationId) },
-      phone_no: form.phone_no,
-      email: form.email,
-      employeeStatus: form.employeeStatus,
-    };
-
     setSaving(true);
+
     try {
       if (editing) {
+        const payload: EmployeePayload = {
+          empId: form.empId,
+          name: form.name,
+          department: { id: Number(form.departmentId) },
+          location: { id: Number(form.locationId) },
+          phone_no: form.phone_no,
+          email: form.email,
+          employeeStatus: form.employeeStatus,
+        };
+
         const updated = await updateEmployee(editing.id, payload);
         setEmployees((p) => p.map((x) => (x.id === editing.id ? updated : x)));
       } else {
+        const payload: EmployeePayload = {
+          empId: form.empId,
+          name: form.name,
+          department: { id: Number(form.departmentId) },
+          location: { id: Number(form.locationId) },
+          phone_no: form.phone_no,
+          email: form.email,
+          employeeStatus: form.employeeStatus,
+        };
+
         const created = await createEmployee(payload);
         setEmployees((p) => [created, ...p]);
       }
+
       setOpenForm(false);
+      setEditing(null);
+      setForm(blankForm());
     } catch (e) {
       alert(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -279,6 +293,7 @@ export function EmployeesTab({
             </Button>
           </div>
         </CardHeader>
+
         <CardContent className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1 md:col-span-2">
             <FieldLabel>Search</FieldLabel>
@@ -288,6 +303,7 @@ export function EmployeesTab({
               placeholder="emp id, name, email…"
             />
           </div>
+
           <div className="space-y-1">
             <FieldLabel>Department</FieldLabel>
             <Select value={deptFilter} onValueChange={setDeptFilter}>
@@ -304,6 +320,7 @@ export function EmployeesTab({
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
             <FieldLabel>Location</FieldLabel>
             <Select value={locFilter} onValueChange={setLocFilter}>
@@ -320,6 +337,7 @@ export function EmployeesTab({
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
             <FieldLabel>Status</FieldLabel>
             <Select
@@ -351,6 +369,7 @@ export function EmployeesTab({
             </span>
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="rounded-md border">
             <Table>
@@ -365,6 +384,7 @@ export function EmployeesTab({
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {loading ? (
                   <LoadingRow colSpan={7} />
@@ -375,7 +395,6 @@ export function EmployeesTab({
                     <TableRow key={e.id}>
                       <TableCell className="font-medium">{e.empId}</TableCell>
                       <TableCell>{e.name}</TableCell>
-                      {/* department/location are nested objects from backend */}
                       <TableCell className="text-muted-foreground">
                         {e.department?.name ?? "-"}
                       </TableCell>
@@ -424,16 +443,17 @@ export function EmployeesTab({
               {editing ? "Edit Employee" : "Add Employee"}
             </DialogTitle>
           </DialogHeader>
+
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <FieldLabel>Employee ID *</FieldLabel>
+              <FieldLabel>Employee ID</FieldLabel>
               <Input
-                value={form.empId}
-                onChange={(e) => f("empId", e.target.value)}
-                placeholder="E1023"
-                disabled={saving}
+                value={editing ? form.empId : "Auto generated by system"}
+                disabled
+                readOnly
               />
             </div>
+
             <div className="space-y-1">
               <FieldLabel>Name *</FieldLabel>
               <Input
@@ -443,9 +463,9 @@ export function EmployeesTab({
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <FieldLabel>Department *</FieldLabel>
-              {/* value is String(dept.id) — on submit we send { id: Number(...) } */}
               <Select
                 value={form.departmentId}
                 onValueChange={(v) => f("departmentId", v)}
@@ -463,9 +483,9 @@ export function EmployeesTab({
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1">
               <FieldLabel>Location *</FieldLabel>
-              {/* value is String(loc.id) — on submit we send { id: Number(...) } */}
               <Select
                 value={form.locationId}
                 onValueChange={(v) => f("locationId", v)}
@@ -483,6 +503,7 @@ export function EmployeesTab({
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1">
               <FieldLabel>Phone</FieldLabel>
               <Input
@@ -492,6 +513,7 @@ export function EmployeesTab({
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1">
               <FieldLabel>Email</FieldLabel>
               <Input
@@ -501,6 +523,7 @@ export function EmployeesTab({
                 disabled={saving}
               />
             </div>
+
             <div className="space-y-1 md:col-span-2">
               <FieldLabel>Status</FieldLabel>
               <Select
@@ -520,6 +543,7 @@ export function EmployeesTab({
               </Select>
             </div>
           </div>
+
           <DialogFooter className="gap-2">
             <Button
               variant="outline"

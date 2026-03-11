@@ -6,6 +6,7 @@ import {
   Trash2,
   MoreHorizontal,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -102,7 +103,6 @@ export default function MaintenancePage() {
     markCompleted,
   } = useMaintenanceApi();
 
-  // ✅ Only updateStatus needed — fetches current asset and patches status cleanly
   const { updateStatus: updateAssetStatus } = useAssetApi();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
@@ -140,7 +140,7 @@ export default function MaintenancePage() {
     setLoading(true);
     try {
       const page = await getAll();
-      setRows(page.content);
+      setRows(Array.isArray(page?.content) ? page.content : []);
     } catch (e) {
       console.error("Failed to load maintenance:", e);
     } finally {
@@ -154,28 +154,37 @@ export default function MaintenancePage() {
 
   React.useEffect(() => {
     getAssets()
-      .then((p) => setAssets(p.content))
-      .catch(() => {});
+      .then((p) => setAssets(Array.isArray(p?.content) ? p.content : []))
+      .catch((e) => {
+        console.error("Failed to load assets:", e);
+        setAssets([]);
+      });
   }, [getAssets]);
 
   React.useEffect(() => {
     getSuppliers()
-      .then(setSuppliers)
-      .catch(() => {});
+      .then((data) => setSuppliers(Array.isArray(data) ? data : []))
+      .catch((e) => {
+        console.error("Failed to load suppliers:", e);
+        setSuppliers([]);
+      });
   }, [getSuppliers]);
 
   // ── Client-side filter ──────────────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
+
     return rows.filter((m) => {
       const matchText =
         !text ||
         `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""} ${m.supplierName ?? ""}`
           .toLowerCase()
           .includes(text);
+
       const matchStatus = statusFilter === "All" || m.status === statusFilter;
       const matchPriority =
         priorityFilter === "All" || m.priority === priorityFilter;
+
       return matchText && matchStatus && matchPriority;
     });
   }, [rows, q, statusFilter, priorityFilter]);
@@ -196,6 +205,7 @@ export default function MaintenancePage() {
     setFormError(null);
     setForm({
       ...emptyMaintenanceForm,
+      ticketNo: "",
       reportedDate: new Date().toISOString().slice(0, 10),
     });
     setOpenForm(true);
@@ -229,7 +239,6 @@ export default function MaintenancePage() {
 
   // ── Validate ────────────────────────────────────────────────────────────────
   const validate = (): string | null => {
-    if (!form.ticketNo.trim()) return "Ticket No is required.";
     if (!form.assetId) return "Asset is required.";
     if (!form.supplierId) return "Supplier is required.";
     if (!form.issueTitle.trim()) return "Issue title is required.";
@@ -244,9 +253,9 @@ export default function MaintenancePage() {
       setFormError(err);
       return;
     }
+
     setFormError(null);
 
-    // ✅ Block if asset already has an active open ticket
     if (!editingId && hasActiveTicket(form.assetId)) {
       setDuplicateAssetId(form.assetId);
       return;
@@ -260,17 +269,26 @@ export default function MaintenancePage() {
         const updated = await update(editingId, form);
         setRows((p) => p.map((x) => (x.id === editingId ? updated : x)));
       } else {
-        const created = await create(form);
+        // On create, backend generates ticketNo
+        const createPayload = {
+          ...form,
+          ticketNo: undefined,
+        };
+        const created = await create(createPayload as MaintenanceFormState);
         setRows((p) => [created, ...p]);
       }
 
-      // ✅ Update asset status: In Repair when open, Available when closed
       await updateAssetStatus(
         form.assetId,
         isClosed ? "Available" : "In Repair",
       );
 
       setOpenForm(false);
+      setEditingId(null);
+      setForm({
+        ...emptyMaintenanceForm,
+        ticketNo: "",
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to save ticket.";
       setFormError(msg);
@@ -282,9 +300,27 @@ export default function MaintenancePage() {
   // ── Delete ──────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteId) return;
+
     try {
+      const existing = rows.find((x) => x.id === deleteId);
+
       await remove(deleteId);
       setRows((p) => p.filter((x) => x.id !== deleteId));
+
+      if (existing?.assetId) {
+        const stillHasOpenTicket = rows.some(
+          (m) =>
+            m.id !== deleteId &&
+            m.assetId === existing.assetId &&
+            m.status !== "Completed" &&
+            m.status !== "Cancelled",
+        );
+
+        await updateAssetStatus(
+          existing.assetId,
+          stillHasOpenTicket ? "In Repair" : "Available",
+        );
+      }
     } catch (e) {
       console.error("Failed to delete ticket:", e);
     } finally {
@@ -296,10 +332,10 @@ export default function MaintenancePage() {
   const handleMarkCompleted = async (id: string) => {
     const existing = rows.find((x) => x.id === id);
     if (!existing) return;
+
     try {
       const updated = await markCompleted(id, existing);
       setRows((p) => p.map((x) => (x.id === id ? updated : x)));
-      // ✅ Asset goes back to Available when ticket is completed
       await updateAssetStatus(existing.assetId, "Available");
     } catch (e) {
       console.error("Failed to mark completed:", e);
@@ -336,6 +372,7 @@ export default function MaintenancePage() {
               placeholder="ticket, asset code, issue, supplier..."
             />
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
             <Select
@@ -357,6 +394,7 @@ export default function MaintenancePage() {
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Priority</div>
             <Select
@@ -404,14 +442,15 @@ export default function MaintenancePage() {
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="py-10 text-center text-muted-foreground"
-                    >
-                      Loading…
+                    <TableCell colSpan={8} className="py-10 text-center">
+                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading…
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
@@ -467,8 +506,8 @@ export default function MaintenancePage() {
                               <DropdownMenuItem
                                 onClick={() => handleMarkCompleted(m.id)}
                               >
-                                <CheckCircle2 className="mr-2 h-4 w-4" /> Mark
-                                Completed
+                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                Mark Completed
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => openEdit(m)}>
@@ -493,7 +532,12 @@ export default function MaintenancePage() {
       </Card>
 
       {/* Add / Edit Dialog */}
-      <Dialog open={openForm} onOpenChange={setOpenForm}>
+      <Dialog
+        open={openForm}
+        onOpenChange={(open) => {
+          if (!saving) setOpenForm(open);
+        }}
+      >
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>
@@ -501,7 +545,6 @@ export default function MaintenancePage() {
             </DialogTitle>
           </DialogHeader>
 
-          {/* ✅ Inline form error */}
           {formError && (
             <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
               {formError}
@@ -510,20 +553,21 @@ export default function MaintenancePage() {
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-1 md:col-span-2">
-              <div className="text-xs text-muted-foreground">Ticket No *</div>
+              <div className="text-xs text-muted-foreground">Ticket No</div>
               <Input
-                value={form.ticketNo}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, ticketNo: e.target.value }))
-                }
-                placeholder="MT-0001"
-                disabled={!!editingId}
+                value={editingId ? form.ticketNo : "Auto generated by system"}
+                disabled
+                readOnly
               />
             </div>
 
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Asset *</div>
-              <Select value={form.assetId} onValueChange={onAssetChange}>
+              <Select
+                value={form.assetId}
+                onValueChange={onAssetChange}
+                disabled={saving || !!editingId}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select asset" />
                 </SelectTrigger>
@@ -537,7 +581,6 @@ export default function MaintenancePage() {
               </Select>
             </div>
 
-            {/* ✅ Supplier sends supplierId (Long) to backend */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Supplier *</div>
               <Select
@@ -545,15 +588,15 @@ export default function MaintenancePage() {
                 onValueChange={(v) =>
                   setForm((p) => ({
                     ...p,
-                    supplierId: v === "__none__" ? "" : v,
+                    supplierId: v,
                   }))
                 }
+                disabled={saving}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select supplier" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
                   {suppliers.map((s) => (
                     <SelectItem key={s.id} value={String(s.id)}>
                       {s.name}
@@ -571,6 +614,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, issueTitle: e.target.value }))
                 }
                 placeholder="Battery health degraded"
+                disabled={saving}
               />
             </div>
 
@@ -582,6 +626,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, description: e.target.value }))
                 }
                 placeholder="Describe the issue briefly..."
+                disabled={saving}
               />
             </div>
 
@@ -592,6 +637,7 @@ export default function MaintenancePage() {
                 onValueChange={(v) =>
                   setForm((p) => ({ ...p, priority: v as MaintenancePriority }))
                 }
+                disabled={saving}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -613,6 +659,7 @@ export default function MaintenancePage() {
                 onValueChange={(v) =>
                   setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
                 }
+                disabled={saving}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -637,6 +684,7 @@ export default function MaintenancePage() {
                 onChange={(e) =>
                   setForm((p) => ({ ...p, reportedDate: e.target.value }))
                 }
+                disabled={saving}
               />
             </div>
 
@@ -648,6 +696,7 @@ export default function MaintenancePage() {
                 onChange={(e) =>
                   setForm((p) => ({ ...p, dueDate: e.target.value }))
                 }
+                disabled={saving}
               />
             </div>
 
@@ -659,6 +708,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, assignedTo: e.target.value }))
                 }
                 placeholder="Technician name"
+                disabled={saving}
               />
             </div>
 
@@ -677,6 +727,7 @@ export default function MaintenancePage() {
                   }))
                 }
                 placeholder="0"
+                disabled={saving}
               />
             </div>
 
@@ -688,6 +739,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, notes: e.target.value }))
                 }
                 placeholder="Extra notes..."
+                disabled={saving}
               />
             </div>
           </div>
@@ -702,17 +754,14 @@ export default function MaintenancePage() {
               Cancel
             </Button>
             <Button onClick={save} type="button" disabled={saving}>
-              {saving
-                ? "Saving…"
-                : editingId
-                  ? "Save Changes"
-                  : "Create Ticket"}
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {editingId ? "Save Changes" : "Create Ticket"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ✅ Duplicate asset active ticket warning */}
+      {/* Duplicate asset active ticket warning */}
       <AlertDialog
         open={!!duplicateAssetId}
         onOpenChange={(open) => !open && setDuplicateAssetId(null)}

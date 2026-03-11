@@ -10,10 +10,16 @@ import {
   Loader2,
   QrCode,
   Download,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 
 import { useAuth } from "@clerk/clerk-react";
 import { useManagementApi } from "@/lib/management-api";
+import { useAssetApi } from "@/lib/api";
+import type { AssetsPage } from "@/lib/api";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,17 +73,9 @@ import type {
   Location,
 } from "@/types";
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
-
-import {
-  fetchAssets,
-  fetchAssetByScan,
-  createAsset,
-  updateAsset,
-  deleteAsset,
-} from "@/lib/api";
-
 import QRCodeLib from "qrcode";
 
+// ─── QR Dialog ────────────────────────────────────────────────────────────────
 interface QRDialogProps {
   asset: Asset | null;
   open: boolean;
@@ -127,8 +125,7 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <QrCode className="h-4 w-4" />
-            QR Code — {asset.assetCode}
+            <QrCode className="h-4 w-4" /> QR Code — {asset.assetCode}
           </DialogTitle>
         </DialogHeader>
 
@@ -138,30 +135,20 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
           </div>
 
           <div className="w-full space-y-1 rounded-md bg-muted/50 px-4 py-3 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Asset Code</span>
-              <span className="font-medium">{asset.assetCode}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Serial No</span>
-              <span className="font-medium">{asset.serialNo}</span>
-            </div>
-            {asset.barcode && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Barcode</span>
-                <span className="font-medium">{asset.barcode}</span>
+            {(
+              [
+                ["Asset Code", asset.assetCode],
+                ["Serial No", asset.serialNo],
+                ...(asset.barcode ? [["Barcode", asset.barcode]] : []),
+                ["Model", `${asset.brand} ${asset.model}`],
+                ["Location", asset.location],
+              ] as [string, string][]
+            ).map(([label, value]) => (
+              <div key={label} className="flex justify-between">
+                <span className="text-muted-foreground">{label}</span>
+                <span className="font-medium">{value}</span>
               </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Model</span>
-              <span className="font-medium">
-                {asset.brand} {asset.model}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Location</span>
-              <span className="font-medium">{asset.location}</span>
-            </div>
+            ))}
           </div>
         </div>
 
@@ -170,8 +157,7 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
             Close
           </Button>
           <Button onClick={handleDownload} className="gap-2" type="button">
-            <Download className="h-4 w-4" />
-            Download PNG
+            <Download className="h-4 w-4" /> Download PNG
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -179,6 +165,7 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
   );
 }
 
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: AssetStatus }) {
   const variant =
     status === "Available"
@@ -192,11 +179,131 @@ function StatusBadge({ status }: { status: AssetStatus }) {
   return <Badge variant={variant}>{status}</Badge>;
 }
 
-export default function Assets() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-  const managementApi = useManagementApi();
+// ─── Pagination Controls ──────────────────────────────────────────────────────
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
-  const [assets, setAssets] = React.useState<Asset[]>([]);
+interface PaginationProps {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (p: number) => void;
+  onPageSizeChange: (s: number) => void;
+}
+
+function PaginationControls({
+  total,
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+}: PaginationProps) {
+  const safeTotalPages = Math.max(totalPages, 1);
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+      <p className="text-sm text-muted-foreground">
+        {total === 0 ? "No results" : `Showing ${from}–${to} of ${total}`}
+      </p>
+
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Rows per page</span>
+          <Select
+            value={String(pageSize)}
+            onValueChange={(v) => {
+              onPageSizeChange(Number(v));
+              onPageChange(1);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[70px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(1)}
+            disabled={page === 1}
+            title="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(page - 1)}
+            disabled={page === 1}
+            title="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+
+          <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+            Page {page} of {safeTotalPages}
+          </span>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= safeTotalPages}
+            title="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(safeTotalPages)}
+            disabled={page >= safeTotalPages}
+            title="Last page"
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function Assets() {
+  const { isLoaded, isSignedIn } = useAuth();
+  const managementApi = useManagementApi();
+  const { getPage, getByScan, create, update, remove } = useAssetApi();
+
+  const [pageData, setPageData] = React.useState<AssetsPage>({
+    content: [],
+    totalElements: 0,
+    totalPages: 1,
+    number: 0,
+    size: 25,
+  });
+
   const [locations, setLocations] = React.useState<Location[]>([]);
   const [employees, setEmployees] = React.useState<Employee[]>([]);
 
@@ -206,6 +313,7 @@ export default function Assets() {
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [scanLoading, setScanLoading] = React.useState(false);
 
+  // ── Filter state ──
   const [q, setQ] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<AssetStatus | "All">(
     "All",
@@ -214,6 +322,10 @@ export default function Assets() {
     "All",
   );
 
+  // ── Pagination state ──
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(25);
+
   const [scanValue, setScanValue] = React.useState("");
   const scanRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -221,33 +333,64 @@ export default function Assets() {
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<AssetFormState>(emptyAssetForm);
   const [saveError, setSaveError] = React.useState<string | null>(null);
-
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [qrAsset, setQrAsset] = React.useState<Asset | null>(null);
 
   const lookupsLoadedRef = React.useRef(false);
+  const loadingRef = React.useRef(false);
 
-  const loadAssets = React.useCallback(async () => {
-    if (!isLoaded) return;
-
-    if (!isSignedIn) {
-      setAssets([]);
+  // ── Fetch page from server ──
+  const loadPage = React.useCallback(async () => {
+    if (!isLoaded || !isSignedIn) {
+      setPageData({
+        content: [],
+        totalElements: 0,
+        totalPages: 1,
+        number: 0,
+        size: pageSize,
+      });
       setPageLoading(false);
       return;
     }
 
+    if (loadingRef.current) return;
+
+    loadingRef.current = true;
     setPageLoading(true);
+
     try {
-      const data = await fetchAssets(getToken);
-      setAssets(data ?? []);
+      const data = await getPage({
+        page: page - 1,
+        size: pageSize,
+      });
+
+      setPageData({
+        content: Array.isArray(data?.content) ? data.content : [],
+        totalElements: data?.totalElements ?? 0,
+        totalPages: data?.totalPages ?? 1,
+        number: data?.number ?? 0,
+        size: data?.size ?? pageSize,
+      });
     } catch (err) {
-      console.error("loadAssets failed:", err);
-      setAssets([]);
+      console.error("loadPage failed:", err);
+      setPageData({
+        content: [],
+        totalElements: 0,
+        totalPages: 1,
+        number: 0,
+        size: pageSize,
+      });
     } finally {
       setPageLoading(false);
+      loadingRef.current = false;
     }
-  }, [isLoaded, isSignedIn, getToken]);
+  }, [isLoaded, isSignedIn, getPage, page, pageSize]);
 
+  React.useEffect(() => {
+    loadPage();
+  }, [loadPage]);
+
+  // ── Load lookups ──
   const loadLookups = React.useCallback(
     async (force = false) => {
       if (!isLoaded || !isSignedIn) {
@@ -276,10 +419,6 @@ export default function Assets() {
   );
 
   React.useEffect(() => {
-    loadAssets();
-  }, [loadAssets]);
-
-  React.useEffect(() => {
     if (openForm) {
       loadLookups();
     }
@@ -289,24 +428,46 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
-  const filtered = React.useMemo(() => {
-    const text = q.trim().toLowerCase();
+  // ── Frontend-only filtering ──
+  const filteredAssets = React.useMemo(() => {
+    const searchText = q.trim().toLowerCase();
 
-    return assets.filter((a) => {
-      const matchText =
-        !text ||
-        `${a.assetCode} ${a.barcode ?? ""} ${a.serialNo} ${a.brand} ${a.model} ${a.location} ${a.assignedTo ?? ""}`
-          .toLowerCase()
-          .includes(text);
+    return pageData.content.filter((asset) => {
+      const matchesSearch =
+        !searchText ||
+        asset.assetCode?.toLowerCase().includes(searchText) ||
+        asset.barcode?.toLowerCase().includes(searchText) ||
+        asset.serialNo?.toLowerCase().includes(searchText) ||
+        asset.brand?.toLowerCase().includes(searchText) ||
+        asset.model?.toLowerCase().includes(searchText) ||
+        asset.category?.toLowerCase().includes(searchText) ||
+        asset.location?.toLowerCase().includes(searchText) ||
+        asset.assignedTo?.toLowerCase().includes(searchText);
 
-      const matchStatus = statusFilter === "All" || a.status === statusFilter;
-      const matchCat =
-        categoryFilter === "All" || a.category === categoryFilter;
+      const matchesStatus =
+        statusFilter === "All" || asset.status === statusFilter;
 
-      return matchText && matchStatus && matchCat;
+      const matchesCategory =
+        categoryFilter === "All" || asset.category === categoryFilter;
+
+      return matchesSearch && matchesStatus && matchesCategory;
     });
-  }, [assets, q, statusFilter, categoryFilter]);
+  }, [pageData.content, q, statusFilter, categoryFilter]);
 
+  // ── Filter handlers ──
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setQ(e.target.value);
+  };
+
+  const handleStatusFilter = (v: string) => {
+    setStatusFilter(v as AssetStatus | "All");
+  };
+
+  const handleCategoryFilter = (v: string) => {
+    setCategoryFilter(v as string | "All");
+  };
+
+  // ── Form helpers ──
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyAssetForm);
@@ -350,6 +511,7 @@ export default function Assets() {
     return null;
   };
 
+  // ── Save ──
   const save = async () => {
     const err = validateForm();
     if (err) {
@@ -367,17 +529,15 @@ export default function Assets() {
 
     try {
       if (editingId) {
-        const updated = await updateAsset(getToken, editingId, form);
-        setAssets((prev) =>
-          prev.map((a) => (a.id === editingId ? updated : a)),
-        );
+        await update(editingId, form);
       } else {
-        const created = await createAsset(getToken, form);
-        setAssets((prev) => [created, ...prev]);
+        await create(form);
+        setPage(1);
       }
 
       setOpenForm(false);
       setForm(emptyAssetForm);
+      await loadPage();
     } catch (e) {
       console.error("save asset failed:", e);
       setSaveError("Failed to save asset. Please try again.");
@@ -386,36 +546,39 @@ export default function Assets() {
     }
   };
 
+  // ── Delete ──
   const confirmDelete = async () => {
-    if (!deleteId) return;
-
-    if (!isLoaded || !isSignedIn) {
+    if (!deleteId || !isLoaded || !isSignedIn) {
       setDeleteId(null);
       return;
     }
 
     setDeleteLoading(true);
     try {
-      await deleteAsset(getToken, deleteId);
-      setAssets((prev) => prev.filter((a) => a.id !== deleteId));
+      await remove(deleteId);
       setDeleteId(null);
+
+      if (pageData.content.length === 1 && page > 1) {
+        setPage((p) => p - 1);
+      } else {
+        await loadPage();
+      }
     } catch (e) {
-      console.error("delete asset failed:", e);
+      console.error("delete failed:", e);
       setDeleteId(null);
     } finally {
       setDeleteLoading(false);
     }
   };
 
+  // ── Barcode scan ──
   const findByBarcode = async (barcode: string) => {
     const code = barcode.trim();
-    if (!code) return;
-
-    if (!isLoaded || !isSignedIn) return;
+    if (!code || !isLoaded || !isSignedIn) return;
 
     setScanLoading(true);
     try {
-      const found = await fetchAssetByScan(getToken, code);
+      const found = await getByScan(code);
       await loadLookups();
       openEdit(found);
     } catch (e) {
@@ -435,6 +598,7 @@ export default function Assets() {
 
   return (
     <div className="space-y-6">
+      {/* ── Header ── */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Assets</h1>
@@ -447,9 +611,9 @@ export default function Assets() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => loadAssets()}
+            onClick={loadPage}
             disabled={pageLoading}
-            title="Refresh Assets"
+            title="Refresh"
             type="button"
           >
             {pageLoading ? (
@@ -460,17 +624,16 @@ export default function Assets() {
           </Button>
 
           <Button onClick={openAdd} className="gap-2" type="button">
-            <Plus className="h-4 w-4" />
-            Add Asset
+            <Plus className="h-4 w-4" /> Add Asset
           </Button>
         </div>
       </div>
 
+      {/* ── Scan Card ── */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <ScanLine className="h-4 w-4" />
-            Barcode / QR Scan
+            <ScanLine className="h-4 w-4" /> Barcode / QR Scan
           </CardTitle>
         </CardHeader>
 
@@ -499,9 +662,7 @@ export default function Assets() {
                 setScanValue("");
               }}
             >
-              {scanLoading ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : null}
+              {scanLoading && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               Find
             </Button>
 
@@ -516,6 +677,7 @@ export default function Assets() {
         </CardContent>
       </Card>
 
+      {/* ── Filters Card ── */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Search & Filters</CardTitle>
@@ -526,17 +688,14 @@ export default function Assets() {
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={handleSearchChange}
               placeholder="asset code, barcode, serial, model, location..."
             />
           </div>
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
-            <Select
-              value={statusFilter}
-              onValueChange={(v) => setStatusFilter(v as AssetStatus | "All")}
-            >
+            <Select value={statusFilter} onValueChange={handleStatusFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
@@ -553,7 +712,7 @@ export default function Assets() {
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Category</div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={handleCategoryFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
@@ -570,16 +729,19 @@ export default function Assets() {
         </CardContent>
       </Card>
 
+      {/* ── Asset Table Card ── */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
             Asset List{" "}
-            <span className="text-muted-foreground">({filtered.length})</span>
+            <span className="text-muted-foreground">
+              ({filteredAssets.length})
+            </span>
           </CardTitle>
         </CardHeader>
 
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-0">
+          <div className="mx-6 rounded-t-md border-x border-t">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -599,12 +761,12 @@ export default function Assets() {
                   <TableRow>
                     <TableCell colSpan={8} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading assets...
+                        <Loader2 className="h-4 w-4 animate-spin" /> Loading
+                        assets...
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : filtered.length === 0 ? (
+                ) : filteredAssets.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -614,7 +776,7 @@ export default function Assets() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((a) => (
+                  filteredAssets.map((a) => (
                     <TableRow key={a.id}>
                       <TableCell className="font-medium">
                         {a.assetCode}
@@ -681,9 +843,21 @@ export default function Assets() {
               </TableBody>
             </Table>
           </div>
+
+          <div className="mx-6 rounded-b-md border-x border-b">
+            <PaginationControls
+              total={pageData.totalElements}
+              page={page}
+              pageSize={pageSize}
+              totalPages={pageData.totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </div>
         </CardContent>
       </Card>
 
+      {/* ── Add / Edit Dialog ── */}
       <Dialog
         open={openForm}
         onOpenChange={(open) => {
@@ -806,9 +980,7 @@ export default function Assets() {
               <div className="text-xs text-muted-foreground">Location *</div>
               <Select
                 value={form.locationId || ""}
-                onValueChange={(value) =>
-                  setForm((p) => ({ ...p, locationId: value }))
-                }
+                onValueChange={(v) => setForm((p) => ({ ...p, locationId: v }))}
                 disabled={saving || lookupLoading}
               >
                 <SelectTrigger>
@@ -842,10 +1014,10 @@ export default function Assets() {
                 value={
                   form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
                 }
-                onValueChange={(value) =>
+                onValueChange={(v) =>
                   setForm((p) => ({
                     ...p,
-                    assignedToId: value === "__NONE__" ? "" : value,
+                    assignedToId: v === "__NONE__" ? "" : v,
                   }))
                 }
                 disabled={saving || lookupLoading}
@@ -917,6 +1089,7 @@ export default function Assets() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Delete Confirm ── */}
       <AlertDialog
         open={!!deleteId}
         onOpenChange={(open) => !open && setDeleteId(null)}
@@ -934,6 +1107,7 @@ export default function Assets() {
             <AlertDialogCancel disabled={deleteLoading} type="button">
               Cancel
             </AlertDialogCancel>
+
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={deleteLoading}
@@ -948,6 +1122,7 @@ export default function Assets() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── QR Dialog ── */}
       <QRDialog
         asset={qrAsset}
         open={!!qrAsset}
