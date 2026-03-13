@@ -12,6 +12,9 @@ import {
   Loader2,
   Repeat,
   Clipboard,
+  ChevronLeft,
+  ChevronRight,
+  Download,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +29,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Link } from "react-router-dom";
 
 import { fetchAssets } from "@/lib/api";
@@ -166,7 +176,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = React.useState(true);
   const [activityLoading, setActivityLoading] = React.useState(true);
 
-  // ── Fetch assets ────────────────────────────────────────────────────────────
+  const [activityPage, setActivityPage] = React.useState(1);
+  const [activityPageSize, setActivityPageSize] = React.useState(5);
+
   React.useEffect(() => {
     let cancelled = false;
     if (!isLoaded) return;
@@ -177,10 +189,11 @@ export default function DashboardPage() {
         setLoading(false);
         return;
       }
+
       setLoading(true);
       try {
         const data = await fetchAssets(getToken);
-        if (!cancelled) setAssets(data);
+        if (!cancelled) setAssets(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("fetchAssets failed:", err);
         if (!cancelled) setAssets([]);
@@ -195,7 +208,6 @@ export default function DashboardPage() {
     };
   }, [isLoaded, isSignedIn, getToken]);
 
-  // ── Fetch activity: transfers + maintenance ─────────────────────────────────
   React.useEffect(() => {
     let cancelled = false;
     if (!isLoaded || !isSignedIn) return;
@@ -203,28 +215,29 @@ export default function DashboardPage() {
     const loadActivity = async () => {
       setActivityLoading(true);
       try {
-        // Fetch both in parallel
         const [transferPage, maintenancePage] = await Promise.all([
-          fetchAssetTransfers(getToken, 0, 20),
-          getAllMaintenance(0, 20),
+          fetchAssetTransfers(getToken, 0, 50),
+          getAllMaintenance(0, 50),
         ]);
 
         if (cancelled) return;
 
-        // Convert both to unified Activity shape
-        const transferActivities = transferPage.content.map(transferToActivity);
-        const maintenanceActivities = maintenancePage.content.map(
+        const transferActivities = (transferPage?.content ?? []).map(
+          transferToActivity,
+        );
+        const maintenanceActivities = (maintenancePage?.content ?? []).map(
           maintenanceToActivity,
         );
 
-        // Merge, sort by date descending, take latest 10
-        const merged = [...transferActivities, ...maintenanceActivities]
-          .sort((a, b) => b.rawDate.getTime() - a.rawDate.getTime())
-          .slice(0, 10);
+        const merged = [...transferActivities, ...maintenanceActivities].sort(
+          (a, b) => b.rawDate.getTime() - a.rawDate.getTime(),
+        );
 
         setActivity(merged);
+        setActivityPage(1);
       } catch (err) {
         console.error("Failed to load activity:", err);
+        if (!cancelled) setActivity([]);
       } finally {
         if (!cancelled) setActivityLoading(false);
       }
@@ -236,7 +249,6 @@ export default function DashboardPage() {
     };
   }, [isLoaded, isSignedIn, getToken, getAllMaintenance]);
 
-  // ── Derived ─────────────────────────────────────────────────────────────────
   const stats = React.useMemo(() => computeStats(assets), [assets]);
   const warrantyExpiring = React.useMemo(
     () => getWarrantyExpiring(assets),
@@ -250,10 +262,67 @@ export default function DashboardPage() {
     { label: "Disposed", value: stats.disposed, icon: ShieldCheck },
   ];
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  const activityTotalPages = Math.max(
+    1,
+    Math.ceil(activity.length / activityPageSize),
+  );
+
+  const paginatedActivity = React.useMemo(() => {
+    const start = (activityPage - 1) * activityPageSize;
+    const end = start + activityPageSize;
+    return activity.slice(start, end);
+  }, [activity, activityPage, activityPageSize]);
+
+  const activityFrom =
+    activity.length === 0 ? 0 : (activityPage - 1) * activityPageSize + 1;
+  const activityTo = Math.min(activityPage * activityPageSize, activity.length);
+
+  React.useEffect(() => {
+    if (activityPage > activityTotalPages) {
+      setActivityPage(activityTotalPages);
+    }
+  }, [activityPage, activityTotalPages]);
+
+  const handleExportWarrantyReport = React.useCallback(() => {
+    if (warrantyExpiring.length === 0) return;
+
+    const rows = warrantyExpiring.map((item) => ({
+      assetCode: item.assetCode,
+      model: item.model,
+      daysRemaining: item.days,
+    }));
+
+    const headers = ["Asset Code", "Model", "Days Remaining"];
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) =>
+        [
+          `"${row.assetCode}"`,
+          `"${row.model.replace(/"/g, '""')}"`,
+          row.daysRemaining,
+        ].join(","),
+      ),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+
+    const today = new Date().toISOString().slice(0, 10);
+    link.setAttribute("download", `warranty-expiring-report-${today}.csv`);
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [warrantyExpiring]);
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
@@ -262,7 +331,6 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((k) => {
           const Icon = k.icon;
@@ -289,7 +357,6 @@ export default function DashboardPage() {
         })}
       </div>
 
-      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Quick Actions</CardTitle>
@@ -306,7 +373,7 @@ export default function DashboardPage() {
             </Link>
           </Button>
           <Button asChild variant="outline" className="gap-2" type="button">
-            <Link to="/transfers">
+            <Link to="/assetTransfer">
               <Repeat className="h-4 w-4" /> Transfer Asset
             </Link>
           </Button>
@@ -322,7 +389,6 @@ export default function DashboardPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Recent Activity */}
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Recent Activity</CardTitle>
@@ -337,47 +403,113 @@ export default function DashboardPage() {
                 No recent activity found.
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Asset</TableHead>
-                    <TableHead>Detail</TableHead>
-                    <TableHead>Time</TableHead>
-                    <TableHead className="text-right">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activity.map((a) => (
-                    <TableRow key={a.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {a.icon === "transfer" ? (
-                            <Repeat className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <Clipboard className="h-4 w-4 text-muted-foreground" />
-                          )}
-                          <span className="text-sm font-medium">
-                            {a.action}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground font-mono text-xs">
-                        {a.assetCode}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm max-w-[200px] truncate">
-                        {a.detail}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {a.time}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <StatusBadge status={a.status} />
-                      </TableCell>
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Asset</TableHead>
+                      <TableHead>Detail</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedActivity.map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {a.icon === "transfer" ? (
+                              <Repeat className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <Clipboard className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            <span className="text-sm font-medium">
+                              {a.action}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {a.assetCode}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
+                          {a.detail}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {a.time}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <StatusBadge status={a.status} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+
+                <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {activityFrom}–{activityTo} of {activity.length}
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">
+                        Rows per page
+                      </span>
+                      <Select
+                        value={String(activityPageSize)}
+                        onValueChange={(value) => {
+                          setActivityPageSize(Number(value));
+                          setActivityPage(1);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[80px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="5">5</SelectItem>
+                          <SelectItem value="10">10</SelectItem>
+                          <SelectItem value="15">15</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        className="h-8 w-8"
+                        disabled={activityPage === 1}
+                        onClick={() =>
+                          setActivityPage((prev) => Math.max(prev - 1, 1))
+                        }
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+
+                      <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+                        Page {activityPage} of {activityTotalPages}
+                      </span>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        type="button"
+                        className="h-8 w-8"
+                        disabled={activityPage === activityTotalPages}
+                        onClick={() =>
+                          setActivityPage((prev) =>
+                            Math.min(prev + 1, activityTotalPages),
+                          )
+                        }
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
 
             <Separator className="my-4" />
@@ -396,7 +528,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Warranty Expiring */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Warranty Expiring</CardTitle>
@@ -427,8 +558,15 @@ export default function DashboardPage() {
                 </div>
               ))
             )}
-            <Button variant="outline" className="w-full" type="button">
-              View Warranty Report
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              type="button"
+              onClick={handleExportWarrantyReport}
+              disabled={loading || warrantyExpiring.length === 0}
+            >
+              <Download className="h-4 w-4" />
+              Export Warranty Report
             </Button>
           </CardContent>
         </Card>

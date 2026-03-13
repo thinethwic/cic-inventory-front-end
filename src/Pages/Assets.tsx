@@ -49,7 +49,6 @@ import {
 } from "@/components/ui/dialog";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -74,6 +73,10 @@ import type {
 } from "@/types";
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
 import QRCodeLib from "qrcode";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const CUSTOM_CATEGORY_VALUE = "__CUSTOM_CATEGORY__";
 
 // ─── QR Dialog ────────────────────────────────────────────────────────────────
 interface QRDialogProps {
@@ -180,8 +183,6 @@ function StatusBadge({ status }: { status: AssetStatus }) {
 }
 
 // ─── Pagination Controls ──────────────────────────────────────────────────────
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-
 interface PaginationProps {
   total: number;
   page: number;
@@ -313,7 +314,6 @@ export default function Assets() {
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [scanLoading, setScanLoading] = React.useState(false);
 
-  // ── Filter state ──
   const [q, setQ] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<AssetStatus | "All">(
     "All",
@@ -322,7 +322,6 @@ export default function Assets() {
     "All",
   );
 
-  // ── Pagination state ──
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
 
@@ -334,7 +333,12 @@ export default function Assets() {
   const [form, setForm] = React.useState<AssetFormState>(emptyAssetForm);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [qrAsset, setQrAsset] = React.useState<Asset | null>(null);
+
+  const [customCategory, setCustomCategory] = React.useState("");
+  const [allCategoryOptions, setAllCategoryOptions] =
+    React.useState<string[]>(categoryOptions);
 
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
@@ -389,6 +393,19 @@ export default function Assets() {
   React.useEffect(() => {
     loadPage();
   }, [loadPage]);
+
+  // ── Build dynamic categories ──
+  React.useEffect(() => {
+    const categoriesFromAssets = pageData.content
+      .map((a) => a.category?.trim())
+      .filter((c): c is string => !!c);
+
+    const merged = Array.from(
+      new Set([...categoryOptions, ...categoriesFromAssets]),
+    ).sort((a, b) => a.localeCompare(b));
+
+    setAllCategoryOptions(merged);
+  }, [pageData.content]);
 
   // ── Load lookups ──
   const loadLookups = React.useCallback(
@@ -471,6 +488,7 @@ export default function Assets() {
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyAssetForm);
+    setCustomCategory("");
     setSaveError(null);
     setOpenForm(true);
   };
@@ -486,10 +504,13 @@ export default function Assets() {
       (emp) => `${emp.empId} - ${emp.name}`.trim() === asset.assignedTo?.trim(),
     );
 
+    const existingCategory = asset.category ?? "Laptop";
+    const isPredefinedCategory = allCategoryOptions.includes(existingCategory);
+
     setForm({
       assetCode: asset.assetCode ?? "",
       barcode: asset.barcode ?? "",
-      category: asset.category ?? "Laptop",
+      category: isPredefinedCategory ? existingCategory : CUSTOM_CATEGORY_VALUE,
       brand: asset.brand ?? "",
       model: asset.model ?? "",
       serialNo: asset.serialNo ?? "",
@@ -500,6 +521,7 @@ export default function Assets() {
       warrantyEnd: asset.warrantyEnd ?? "",
     });
 
+    setCustomCategory(isPredefinedCategory ? "" : existingCategory);
     setSaveError(null);
     setOpenForm(true);
   };
@@ -508,6 +530,11 @@ export default function Assets() {
     if (!form.assetCode.trim()) return "Asset code is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
+
+    if (form.category === CUSTOM_CATEGORY_VALUE && !customCategory.trim()) {
+      return "Custom category is required.";
+    }
+
     return null;
   };
 
@@ -527,16 +554,33 @@ export default function Assets() {
     setSaving(true);
     setSaveError(null);
 
+    const finalCategory =
+      form.category === CUSTOM_CATEGORY_VALUE
+        ? customCategory.trim()
+        : form.category;
+
+    const payload: AssetFormState = {
+      ...form,
+      category: finalCategory,
+    };
+
     try {
       if (editingId) {
-        await update(editingId, form);
+        await update(editingId, payload);
       } else {
-        await create(form);
+        await create(payload);
         setPage(1);
+      }
+
+      if (finalCategory && !allCategoryOptions.includes(finalCategory)) {
+        setAllCategoryOptions((prev) =>
+          [...prev, finalCategory].sort((a, b) => a.localeCompare(b)),
+        );
       }
 
       setOpenForm(false);
       setForm(emptyAssetForm);
+      setCustomCategory("");
       await loadPage();
     } catch (e) {
       console.error("save asset failed:", e);
@@ -549,23 +593,48 @@ export default function Assets() {
   // ── Delete ──
   const confirmDelete = async () => {
     if (!deleteId || !isLoaded || !isSignedIn) {
-      setDeleteId(null);
       return;
     }
 
     setDeleteLoading(true);
+    setDeleteError(null);
+
     try {
       await remove(deleteId);
+
       setDeleteId(null);
+      setDeleteError(null);
 
       if (pageData.content.length === 1 && page > 1) {
         setPage((p) => p - 1);
       } else {
         await loadPage();
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.error("delete failed:", e);
-      setDeleteId(null);
+
+      let message = "Failed to delete asset!";
+
+      if (e instanceof Error) {
+        const backendMessage = e.message?.trim() || "";
+        const lowerMsg = backendMessage.toLowerCase();
+
+        if (
+          lowerMsg.includes("foreign key") ||
+          lowerMsg.includes("constraint") ||
+          lowerMsg.includes("reference") ||
+          lowerMsg.includes("child record") ||
+          lowerMsg.includes("linked") ||
+          lowerMsg.includes("used in another record")
+        ) {
+          message =
+            "Failed to delete asset! This asset is linked to other records.";
+        } else if (backendMessage) {
+          message = backendMessage;
+        }
+      }
+
+      setDeleteError(message);
     } finally {
       setDeleteLoading(false);
     }
@@ -718,7 +787,7 @@ export default function Assets() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="All">All</SelectItem>
-                {categoryOptions.map((c) => (
+                {allCategoryOptions.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
                   </SelectItem>
@@ -830,7 +899,10 @@ export default function Assets() {
 
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
-                              onClick={() => setDeleteId(a.id)}
+                              onClick={() => {
+                                setDeleteError(null);
+                                setDeleteId(a.id);
+                              }}
                             >
                               <Trash2 className="mr-2 h-4 w-4" /> Delete
                             </DropdownMenuItem>
@@ -902,20 +974,37 @@ export default function Assets() {
               <div className="text-xs text-muted-foreground">Category</div>
               <Select
                 value={form.category}
-                onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
+                onValueChange={(v) =>
+                  setForm((p) => ({
+                    ...p,
+                    category: v,
+                  }))
+                }
                 disabled={saving}
               >
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categoryOptions.map((c) => (
+                  {allCategoryOptions.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>
                   ))}
+                  <SelectItem value={CUSTOM_CATEGORY_VALUE}>
+                    Other / Add New Category
+                  </SelectItem>
                 </SelectContent>
               </Select>
+
+              {form.category === CUSTOM_CATEGORY_VALUE && (
+                <Input
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  placeholder="Enter new category"
+                  disabled={saving}
+                />
+              )}
             </div>
 
             <div className="space-y-1">
@@ -1092,7 +1181,12 @@ export default function Assets() {
       {/* ── Delete Confirm ── */}
       <AlertDialog
         open={!!deleteId}
-        onOpenChange={(open) => !open && setDeleteId(null)}
+        onOpenChange={(open) => {
+          if (!open && !deleteLoading) {
+            setDeleteId(null);
+            setDeleteError(null);
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1103,12 +1197,26 @@ export default function Assets() {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
+          {deleteError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {deleteError}
+            </div>
+          )}
+
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteLoading} type="button">
+            <AlertDialogCancel
+              disabled={deleteLoading}
+              type="button"
+              onClick={() => {
+                setDeleteId(null);
+                setDeleteError(null);
+              }}
+            >
               Cancel
             </AlertDialogCancel>
 
-            <AlertDialogAction
+            <Button
+              variant="destructive"
               onClick={confirmDelete}
               disabled={deleteLoading}
               type="button"
@@ -1117,7 +1225,7 @@ export default function Assets() {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Delete
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

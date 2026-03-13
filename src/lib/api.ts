@@ -4,7 +4,7 @@ import { useAuth } from "@clerk/clerk-react";
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://cic-inventory-back-end.onrender.com";
 const ASSETS_ENDPOINT = `${BASE_URL}/api/v1/assets`;
 const JWT_TEMPLATE = "cic-inventory";
 
@@ -176,10 +176,22 @@ function buildPageParams(params: FetchAssetsParams): URLSearchParams {
 }
 
 // ─── Response helper ──────────────────────────────────────────────────────────
+// Tries to parse the error body as JSON and extract a `message` field
+// (Spring Boot's default error envelope). Falls back to raw text.
 async function handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
-        const message = await res.text().catch(() => `HTTP ${res.status}`);
-        throw new Error(message || `Request failed with status ${res.status}`);
+        const text = await res.text().catch(() => "");
+        let message = `Request failed with status ${res.status}`;
+        if (text) {
+            try {
+                const json = JSON.parse(text);
+                // Spring Boot error body: { message, error, ... }
+                message = json.message ?? json.error ?? text;
+            } catch {
+                message = text;
+            }
+        }
+        throw new Error(message);
     }
     if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
@@ -200,6 +212,7 @@ async function authFetch(
     template = JWT_TEMPLATE,
 ) {
     const token = await getToken({ template });
+    console.log(token)
     if (!token) throw new Error("No auth token (user not signed in)");
     return fetch(url, {
         ...init,
@@ -212,7 +225,7 @@ async function authFetch(
 }
 
 // ─── Standalone exports (backward compatible) ─────────────────────────────────
-/** @deprecated Use the useAssetApi hook instead. */
+/**Use the useAssetApi hook instead. */
 export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
     const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?size=1000`);
     const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);

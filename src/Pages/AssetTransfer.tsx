@@ -53,8 +53,9 @@ type TransferType = "employee" | "location" | "both";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getEmployeeLabel(employee: Employee) {
-  if (employee.empId && employee.name)
+  if (employee.empId && employee.name) {
     return `${employee.empId} - ${employee.name}`;
+  }
   return employee.name || employee.empId || `Employee #${employee.id}`;
 }
 
@@ -72,6 +73,51 @@ function getStatusBadgeVariant(status: string) {
     default:
       return "outline";
   }
+}
+
+function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
+  if (!(err instanceof Error)) return fallback;
+
+  const raw = err.message?.trim() || "";
+  const lower = raw.toLowerCase();
+
+  if (
+    lower.includes("foreign key") ||
+    lower.includes("constraint") ||
+    lower.includes("reference") ||
+    lower.includes("child record") ||
+    lower.includes("linked") ||
+    lower.includes("used in another record")
+  ) {
+    return "This record is linked to other data, so the operation cannot be completed.";
+  }
+
+  if (
+    lower.includes("not found") ||
+    lower.includes("asset not found") ||
+    lower.includes("employee not found") ||
+    lower.includes("location not found")
+  ) {
+    return raw || "Required data was not found.";
+  }
+
+  if (
+    lower.includes("conflict") ||
+    lower.includes("already exists") ||
+    lower.includes("already assigned")
+  ) {
+    return raw || "A conflict occurred while processing the request.";
+  }
+
+  if (
+    lower.includes("bad request") ||
+    lower.includes("validation") ||
+    lower.includes("invalid")
+  ) {
+    return raw || "Invalid data provided.";
+  }
+
+  return raw || fallback;
 }
 
 /**
@@ -117,9 +163,9 @@ export default function AssetTransferPage() {
   const { getToken } = useAuth();
   const managementApi = useManagementApi();
 
-  // Stable refs — prevent stale closures in useCallback
   const getTokenRef = React.useRef(getToken);
   getTokenRef.current = getToken;
+
   const loadAssetLookupsRef = React.useRef(managementApi.loadAssetLookups);
   loadAssetLookupsRef.current = managementApi.loadAssetLookups;
 
@@ -150,16 +196,18 @@ export default function AssetTransferPage() {
   const loadPageData = React.useCallback(async () => {
     setLoading(true);
     setError("");
+
     try {
       const [assetRows, lookups] = await Promise.all([
         fetchAssets(getTokenRef.current),
         loadAssetLookupsRef.current(),
       ]);
-      setAssets(assetRows);
-      setEmployees(lookups.employees);
-      setLocations(lookups.locations);
+
+      setAssets(Array.isArray(assetRows) ? assetRows : []);
+      setEmployees(Array.isArray(lookups?.employees) ? lookups.employees : []);
+      setLocations(Array.isArray(lookups?.locations) ? lookups.locations : []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data.");
+      setError(getReadableErrorMessage(err, "Failed to load data."));
     } finally {
       setLoading(false);
     }
@@ -167,9 +215,10 @@ export default function AssetTransferPage() {
 
   const loadHistory = React.useCallback(async () => {
     setHistoryLoading(true);
+
     try {
       const page = await fetchAssetTransfers(getTokenRef.current, 0, 50);
-      setHistory(page.content);
+      setHistory(Array.isArray(page?.content) ? page.content : []);
     } catch (err) {
       console.warn("Failed to load transfer history:", err);
     } finally {
@@ -186,6 +235,7 @@ export default function AssetTransferPage() {
   const filteredAssets = React.useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return assets;
+
     return assets.filter((a) =>
       [
         a.assetCode,
@@ -209,7 +259,6 @@ export default function AssetTransferPage() {
     [assets, selectedAssetId],
   );
 
-  // Reset form when asset changes
   React.useEffect(() => {
     setSuccess("");
     setError("");
@@ -224,6 +273,11 @@ export default function AssetTransferPage() {
       return;
     }
 
+    if (!transferDate) {
+      setError("Please select a transfer date.");
+      return;
+    }
+
     if (
       (transferType === "employee" || transferType === "both") &&
       !newEmployeeId
@@ -231,6 +285,7 @@ export default function AssetTransferPage() {
       setError("Please select a new employee.");
       return;
     }
+
     if (
       (transferType === "location" || transferType === "both") &&
       !newLocationId
@@ -238,6 +293,7 @@ export default function AssetTransferPage() {
       setError("Please select a new location.");
       return;
     }
+
     if (
       (transferType === "employee" || transferType === "both") &&
       selectedAsset.assignedToId === newEmployeeId
@@ -245,6 +301,7 @@ export default function AssetTransferPage() {
       setError("Asset is already assigned to this employee.");
       return;
     }
+
     if (
       (transferType === "location" || transferType === "both") &&
       selectedAsset.locationId === newLocationId
@@ -258,49 +315,48 @@ export default function AssetTransferPage() {
     setSuccess("");
 
     try {
-      // ── Step 1: Update the asset's employee / location assignment ──────────
       const assetPayload = buildAssetPayload({
         asset: selectedAsset,
         transferType,
         newEmployeeId,
         newLocationId,
       });
+
       const updatedAsset = await updateAsset(
         getToken,
         selectedAsset.id,
         assetPayload,
       );
 
-      // ── Step 2: Persist the transfer record in the backend ─────────────────
-      //   Only the fields the entity actually has:
-      //   assetId, transferType, transferDate, reason
       const dto: AssetTransferDTO = {
         assetId: { id: Number(selectedAsset.id) },
-        transferType, // "employee" | "location" | "both"
-        transferDate, // "YYYY-MM-DD"
+        transferType,
+        transferDate,
         reason: reason.trim() || undefined,
       };
+
       const savedTransfer = await createAssetTransfer(getToken, dto);
 
-      // ── Step 3: Sync local state ───────────────────────────────────────────
       setAssets((prev) =>
         prev.map((item) => (item.id === updatedAsset.id ? updatedAsset : item)),
       );
-      setSelectedAssetId(updatedAsset.id);
-      setHistory((prev) => [savedTransfer, ...prev]); // prepend latest
 
-      // ── Step 4: Reset form ─────────────────────────────────────────────────
+      setSelectedAssetId(updatedAsset.id);
+      setHistory((prev) => [savedTransfer, ...prev]);
+
       setTransferType("both");
       setNewEmployeeId("");
       setNewLocationId("");
       setTransferDate(new Date().toISOString().slice(0, 10));
       setReason("");
+
       setSuccess(
-        `Transfer complete — ${updatedAsset.assetCode} is now assigned to ` +
-          `${updatedAsset.assignedTo || "nobody"} at ${updatedAsset.location || "no location"}.`,
+        `Transfer complete — ${updatedAsset.assetCode} is now assigned to ${
+          updatedAsset.assignedTo || "nobody"
+        } at ${updatedAsset.location || "no location"}.`,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Transfer failed.");
+      setError(getReadableErrorMessage(err, "Transfer failed."));
     } finally {
       setSubmitting(false);
     }
@@ -309,7 +365,6 @@ export default function AssetTransferPage() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6 p-6">
-      {/* Header */}
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Asset Transfer</h1>
@@ -317,19 +372,20 @@ export default function AssetTransferPage() {
             Transfer assets between employees and locations.
           </p>
         </div>
+
         <Badge variant="secondary" className="w-fit gap-2 px-3 py-1.5">
           <Repeat className="h-4 w-4" />
           Transfer Management
         </Badge>
       </div>
 
-      {/* Alerts */}
       {error && (
         <Alert variant="destructive">
           <AlertTitle>Something went wrong</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
       {success && (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
@@ -350,13 +406,12 @@ export default function AssetTransferPage() {
       ) : (
         <>
           <div className="grid gap-6 xl:grid-cols-3">
-            {/* ── Transfer Form ── */}
             <Card className="xl:col-span-2">
               <CardHeader>
                 <CardTitle>Create Transfer</CardTitle>
               </CardHeader>
+
               <CardContent className="space-y-6">
-                {/* Search */}
                 <div className="space-y-2">
                   <Label htmlFor="search-asset">Search Asset</Label>
                   <div className="relative">
@@ -371,7 +426,6 @@ export default function AssetTransferPage() {
                   </div>
                 </div>
 
-                {/* Asset selector */}
                 <div className="space-y-2">
                   <Label>Select Asset</Label>
                   <Select
@@ -397,7 +451,6 @@ export default function AssetTransferPage() {
                   </Select>
                 </div>
 
-                {/* Transfer type + date */}
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Transfer Type</Label>
@@ -421,6 +474,7 @@ export default function AssetTransferPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
                     <Label>Transfer Date</Label>
                     <Input
@@ -431,7 +485,6 @@ export default function AssetTransferPage() {
                   </div>
                 </div>
 
-                {/* New employee */}
                 {(transferType === "employee" || transferType === "both") && (
                   <div className="space-y-2">
                     <Label>New Employee</Label>
@@ -459,7 +512,6 @@ export default function AssetTransferPage() {
                   </div>
                 )}
 
-                {/* New location */}
                 {(transferType === "location" || transferType === "both") && (
                   <div className="space-y-2">
                     <Label>New Location</Label>
@@ -487,7 +539,6 @@ export default function AssetTransferPage() {
                   </div>
                 )}
 
-                {/* Reason */}
                 <div className="space-y-2">
                   <Label>Reason / Notes</Label>
                   <Textarea
@@ -498,7 +549,6 @@ export default function AssetTransferPage() {
                   />
                 </div>
 
-                {/* Actions */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                   <Button
                     type="button"
@@ -511,6 +561,7 @@ export default function AssetTransferPage() {
                   >
                     Refresh Data
                   </Button>
+
                   <Button
                     type="button"
                     onClick={() => void handleTransfer()}
@@ -528,11 +579,11 @@ export default function AssetTransferPage() {
               </CardContent>
             </Card>
 
-            {/* ── Asset Details Panel ── */}
             <Card>
               <CardHeader>
                 <CardTitle>Selected Asset Details</CardTitle>
               </CardHeader>
+
               <CardContent>
                 {selectedAsset ? (
                   <div className="space-y-4">
@@ -563,6 +614,7 @@ export default function AssetTransferPage() {
                           </p>
                         </div>
                       </div>
+
                       <div className="flex items-start gap-2">
                         <MapPin className="mt-0.5 h-4 w-4 text-muted-foreground" />
                         <div>
@@ -572,6 +624,7 @@ export default function AssetTransferPage() {
                           </p>
                         </div>
                       </div>
+
                       <div className="flex items-start gap-2">
                         <Package className="mt-0.5 h-4 w-4 text-muted-foreground" />
                         <div>
@@ -585,6 +638,7 @@ export default function AssetTransferPage() {
                           </Badge>
                         </div>
                       </div>
+
                       <div className="flex items-start gap-2">
                         <FileText className="mt-0.5 h-4 w-4 text-muted-foreground" />
                         <div>
@@ -594,6 +648,7 @@ export default function AssetTransferPage() {
                           </p>
                         </div>
                       </div>
+
                       {selectedAsset.barcode && (
                         <div className="flex items-start gap-2">
                           <FileText className="mt-0.5 h-4 w-4 text-muted-foreground" />
@@ -616,11 +671,11 @@ export default function AssetTransferPage() {
             </Card>
           </div>
 
-          {/* ── Transfer History ── */}
           <Card>
             <CardHeader>
               <CardTitle>Transfer History</CardTitle>
             </CardHeader>
+
             <CardContent>
               {historyLoading ? (
                 <div className="flex min-h-[100px] items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -640,6 +695,7 @@ export default function AssetTransferPage() {
                         <TableHead>Recorded At</TableHead>
                       </TableRow>
                     </TableHeader>
+
                     <TableBody>
                       {history.length > 0 ? (
                         history.map((item) => (
@@ -657,7 +713,7 @@ export default function AssetTransferPage() {
                             </TableCell>
                             <TableCell>{item.transferDate}</TableCell>
                             <TableCell>{item.reason || "-"}</TableCell>
-                            <TableCell className="text-muted-foreground text-xs">
+                            <TableCell className="text-xs text-muted-foreground">
                               {new Date(item.createdAt).toLocaleString()}
                             </TableCell>
                           </TableRow>
