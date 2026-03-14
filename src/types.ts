@@ -54,6 +54,9 @@ export interface Asset {
 
     purchaseDate?: string;
     warrantyEnd?: string;
+
+    supplierId?: number;
+    supplierName?: string;
 }
 
 // ─── Form state (all optional fields as empty string for controlled inputs) ───
@@ -69,6 +72,7 @@ export type AssetFormState = {
     assignedToId?: string;      // FIX: was assignedEmployeeId — must match Assets.tsx usage
     purchaseDate?: string;
     warrantyEnd?: string;
+    supplierId?: string;
 };
 
 export const emptyAssetForm: AssetFormState = {
@@ -83,6 +87,7 @@ export const emptyAssetForm: AssetFormState = {
     assignedToId: "",           // FIX: was assignedEmployeeId
     purchaseDate: "",
     warrantyEnd: "",
+    supplierId: "",
 };
 
 // ─── Entity base — backend returns Long (number) for id ───────────────────────

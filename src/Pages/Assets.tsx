@@ -70,6 +70,7 @@ import type {
   AssetFormState,
   Employee,
   Location,
+  Supplier,
 } from "@/types";
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
 import QRCodeLib from "qrcode";
@@ -145,6 +146,9 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
                 ...(asset.barcode ? [["Barcode", asset.barcode]] : []),
                 ["Model", `${asset.brand} ${asset.model}`],
                 ["Location", asset.location],
+                ...(asset.supplierName
+                  ? [["Supplier", asset.supplierName]]
+                  : []),
               ] as [string, string][]
             ).map(([label, value]) => (
               <div key={label} className="flex justify-between">
@@ -307,6 +311,7 @@ export default function Assets() {
 
   const [locations, setLocations] = React.useState<Location[]>([]);
   const [employees, setEmployees] = React.useState<Employee[]>([]);
+  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
 
   const [pageLoading, setPageLoading] = React.useState(true);
   const [lookupLoading, setLookupLoading] = React.useState(false);
@@ -318,9 +323,9 @@ export default function Assets() {
   const [statusFilter, setStatusFilter] = React.useState<AssetStatus | "All">(
     "All",
   );
-  const [categoryFilter, setCategoryFilter] = React.useState<string | "All">(
-    "All",
-  );
+  const [categoryFilter, setCategoryFilter] = React.useState<string>("All");
+  // Stores the selected supplier id as a string, or "All"
+  const [supplierFilter, setSupplierFilter] = React.useState<string>("All");
 
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
@@ -363,10 +368,7 @@ export default function Assets() {
     setPageLoading(true);
 
     try {
-      const data = await getPage({
-        page: page - 1,
-        size: pageSize,
-      });
+      const data = await getPage({ page: page - 1, size: pageSize });
 
       setPageData({
         content: Array.isArray(data?.content) ? data.content : [],
@@ -407,12 +409,13 @@ export default function Assets() {
     setAllCategoryOptions(merged);
   }, [pageData.content]);
 
-  // ── Load lookups ──
+  // ── Load lookups (locations, employees, suppliers) ──
   const loadLookups = React.useCallback(
     async (force = false) => {
       if (!isLoaded || !isSignedIn) {
         setLocations([]);
         setEmployees([]);
+        setSuppliers([]);
         return;
       }
 
@@ -423,11 +426,13 @@ export default function Assets() {
         const data = await managementApi.loadAssetLookups();
         setLocations(Array.isArray(data?.locations) ? data.locations : []);
         setEmployees(Array.isArray(data?.employees) ? data.employees : []);
+        setSuppliers(Array.isArray(data?.suppliers) ? data.suppliers : []);
         lookupsLoadedRef.current = true;
       } catch (err) {
         console.error("loadLookups failed:", err);
         setLocations([]);
         setEmployees([]);
+        setSuppliers([]);
       } finally {
         setLookupLoading(false);
       }
@@ -435,10 +440,20 @@ export default function Assets() {
     [isLoaded, isSignedIn, managementApi],
   );
 
+  // Reset cache whenever auth becomes ready so loadLookups fires on sign-in
   React.useEffect(() => {
-    if (openForm) {
-      loadLookups();
+    if (isLoaded && isSignedIn) {
+      lookupsLoadedRef.current = false;
     }
+  }, [isLoaded, isSignedIn]);
+
+  // Load eagerly on mount and after auth so supplier filter is populated
+  React.useEffect(() => {
+    loadLookups();
+  }, [loadLookups]);
+
+  React.useEffect(() => {
+    if (openForm) loadLookups();
   }, [openForm, loadLookups]);
 
   React.useEffect(() => {
@@ -459,7 +474,8 @@ export default function Assets() {
         asset.model?.toLowerCase().includes(searchText) ||
         asset.category?.toLowerCase().includes(searchText) ||
         asset.location?.toLowerCase().includes(searchText) ||
-        asset.assignedTo?.toLowerCase().includes(searchText);
+        asset.assignedTo?.toLowerCase().includes(searchText) ||
+        asset.supplierName?.toLowerCase().includes(searchText);
 
       const matchesStatus =
         statusFilter === "All" || asset.status === statusFilter;
@@ -467,22 +483,26 @@ export default function Assets() {
       const matchesCategory =
         categoryFilter === "All" || asset.category === categoryFilter;
 
-      return matchesSearch && matchesStatus && matchesCategory;
+      // Match on supplierId (numeric FK stored on the asset)
+      const matchesSupplier =
+        supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
+
+      return (
+        matchesSearch && matchesStatus && matchesCategory && matchesSupplier
+      );
     });
-  }, [pageData.content, q, statusFilter, categoryFilter]);
+  }, [pageData.content, q, statusFilter, categoryFilter, supplierFilter]);
 
   // ── Filter handlers ──
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setQ(e.target.value);
-  };
 
-  const handleStatusFilter = (v: string) => {
+  const handleStatusFilter = (v: string) =>
     setStatusFilter(v as AssetStatus | "All");
-  };
 
-  const handleCategoryFilter = (v: string) => {
-    setCategoryFilter(v as string | "All");
-  };
+  const handleCategoryFilter = (v: string) => setCategoryFilter(v);
+
+  const handleSupplierFilter = (v: string) => setSupplierFilter(v);
 
   // ── Form helpers ──
   const openAdd = () => {
@@ -507,6 +527,12 @@ export default function Assets() {
     const existingCategory = asset.category ?? "Laptop";
     const isPredefinedCategory = allCategoryOptions.includes(existingCategory);
 
+    // Resolve supplierId: prefer the numeric FK on the asset, otherwise
+    // match by the resolved name string the API may have returned
+    const matchingSupplier =
+      suppliers.find((s) => s.id === asset.supplierId) ??
+      suppliers.find((s) => s.name?.trim() === asset.supplierName?.trim());
+
     setForm({
       assetCode: asset.assetCode ?? "",
       barcode: asset.barcode ?? "",
@@ -517,6 +543,7 @@ export default function Assets() {
       status: asset.status ?? "Available",
       locationId: matchingLocation ? String(matchingLocation.id) : "",
       assignedToId: matchingEmployee ? String(matchingEmployee.id) : "",
+      supplierId: matchingSupplier ? String(matchingSupplier.id) : "",
       purchaseDate: asset.purchaseDate ?? "",
       warrantyEnd: asset.warrantyEnd ?? "",
     });
@@ -530,6 +557,7 @@ export default function Assets() {
     if (!form.assetCode.trim()) return "Asset code is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
+    if (!form.supplierId?.trim()) return "Supplier is required.";
 
     if (form.category === CUSTOM_CATEGORY_VALUE && !customCategory.trim()) {
       return "Custom category is required.";
@@ -559,10 +587,7 @@ export default function Assets() {
         ? customCategory.trim()
         : form.category;
 
-    const payload: AssetFormState = {
-      ...form,
-      category: finalCategory,
-    };
+    const payload: AssetFormState = { ...form, category: finalCategory };
 
     try {
       if (editingId) {
@@ -584,7 +609,11 @@ export default function Assets() {
       await loadPage();
     } catch (e) {
       console.error("save asset failed:", e);
-      setSaveError("Failed to save asset. Please try again.");
+      const msg =
+        e instanceof Error
+          ? e.message
+          : "Failed to save asset. Please try again.";
+      setSaveError(msg);
     } finally {
       setSaving(false);
     }
@@ -592,16 +621,13 @@ export default function Assets() {
 
   // ── Delete ──
   const confirmDelete = async () => {
-    if (!deleteId || !isLoaded || !isSignedIn) {
-      return;
-    }
+    if (!deleteId || !isLoaded || !isSignedIn) return;
 
     setDeleteLoading(true);
     setDeleteError(null);
 
     try {
       await remove(deleteId);
-
       setDeleteId(null);
       setDeleteError(null);
 
@@ -752,13 +778,13 @@ export default function Assets() {
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
 
-        <CardContent className="grid gap-3 md:grid-cols-3">
+        <CardContent className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
               value={q}
               onChange={handleSearchChange}
-              placeholder="asset code, barcode, serial, model, location..."
+              placeholder="asset code, serial, model, supplier..."
             />
           </div>
 
@@ -795,6 +821,30 @@ export default function Assets() {
               </SelectContent>
             </Select>
           </div>
+
+          {/* ── Supplier filter — driven by registered suppliers table ── */}
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground">Supplier</div>
+            <Select value={supplierFilter} onValueChange={handleSupplierFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All</SelectItem>
+                {suppliers.length === 0 ? (
+                  <SelectItem value="__NONE__" disabled>
+                    {lookupLoading ? "Loading…" : "No suppliers registered"}
+                  </SelectItem>
+                ) : (
+                  suppliers.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 
@@ -821,6 +871,7 @@ export default function Assets() {
                   <TableHead>Serial No</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Location</TableHead>
+                  <TableHead>Supplier</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -828,7 +879,7 @@ export default function Assets() {
               <TableBody>
                 {pageLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center">
+                    <TableCell colSpan={9} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin" /> Loading
                         assets...
@@ -838,7 +889,7 @@ export default function Assets() {
                 ) : filteredAssets.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="py-10 text-center text-muted-foreground"
                     >
                       No assets found.
@@ -867,6 +918,9 @@ export default function Assets() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {a.location}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {a.supplierName || "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
@@ -974,12 +1028,7 @@ export default function Assets() {
               <div className="text-xs text-muted-foreground">Category</div>
               <Select
                 value={form.category}
-                onValueChange={(v) =>
-                  setForm((p) => ({
-                    ...p,
-                    category: v,
-                  }))
-                }
+                onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
                 disabled={saving}
               >
                 <SelectTrigger>
@@ -1128,6 +1177,42 @@ export default function Assets() {
                     employees.map((emp) => (
                       <SelectItem key={emp.id} value={String(emp.id)}>
                         {emp.empId} - {emp.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* ── Supplier — required, from registered suppliers table ── */}
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Supplier *</div>
+              <Select
+                value={form.supplierId?.trim() ? form.supplierId : ""}
+                onValueChange={(v) => setForm((p) => ({ ...p, supplierId: v }))}
+                disabled={saving || lookupLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      lookupLoading ? "Loading suppliers..." : "Select supplier"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {suppliers.length === 0 && !lookupLoading ? (
+                    <SelectItem value="__NO_SUPPLIER__" disabled>
+                      No suppliers registered
+                    </SelectItem>
+                  ) : (
+                    suppliers.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.name}
+                        {s.phone && (
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {s.phone}
+                          </span>
+                        )}
                       </SelectItem>
                     ))
                   )}

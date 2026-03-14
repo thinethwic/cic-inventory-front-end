@@ -41,6 +41,9 @@ interface RawAsset {
     status: string;
     location?: string | RawLocation | null;
     assignedTo?: string | RawEmployee | null;
+    // Supplier flat fields returned by AssetResponseDTO
+    supplierId?: number | null;
+    supplierName?: string | null;
     purchaseDate?: string | null;
     warrantyEnd?: string | null;
     createdAt?: string;
@@ -142,6 +145,9 @@ function toAsset(raw: RawAsset): Asset {
         assignedTo: getAssignedToLabel(raw.assignedTo),
         locationId: getLocationId(raw.location),
         assignedToId: getAssignedToId(raw.assignedTo),
+        // Supplier flat fields
+        supplierId: raw.supplierId ?? undefined,
+        supplierName: raw.supplierName ?? undefined,
         purchaseDate: raw.purchaseDate ?? "",
         warrantyEnd: raw.warrantyEnd ?? "",
     };
@@ -158,6 +164,8 @@ function toRequestBody(form: AssetFormState) {
         status: STATUS_TO_BACKEND[form.status] ?? form.status,
         locationId: Number(form.locationId),
         assignedToId: form.assignedToId?.trim() ? Number(form.assignedToId) : null,
+        // supplierId is required — send as number
+        supplierId: form.supplierId?.trim() ? Number(form.supplierId) : null,
         purchaseDate: form.purchaseDate || null,
         warrantyEnd: form.warrantyEnd || null,
     };
@@ -176,8 +184,6 @@ function buildPageParams(params: FetchAssetsParams): URLSearchParams {
 }
 
 // ─── Response helper ──────────────────────────────────────────────────────────
-// Tries to parse the error body as JSON and extract a `message` field
-// (Spring Boot's default error envelope). Falls back to raw text.
 async function handleResponse<T>(res: Response): Promise<T> {
     if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -185,7 +191,6 @@ async function handleResponse<T>(res: Response): Promise<T> {
         if (text) {
             try {
                 const json = JSON.parse(text);
-                // Spring Boot error body: { message, error, ... }
                 message = json.message ?? json.error ?? text;
             } catch {
                 message = text;
@@ -212,7 +217,6 @@ async function authFetch(
     template = JWT_TEMPLATE,
 ) {
     const token = await getToken({ template });
-    console.log(token)
     if (!token) throw new Error("No auth token (user not signed in)");
     return fetch(url, {
         ...init,
@@ -225,7 +229,7 @@ async function authFetch(
 }
 
 // ─── Standalone exports (backward compatible) ─────────────────────────────────
-/**Use the useAssetApi hook instead. */
+/** @deprecated Use the useAssetApi hook instead. */
 export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {
     const res = await authFetch(getToken, `${ASSETS_ENDPOINT}?size=1000`);
     const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
@@ -305,13 +309,11 @@ export async function deleteAsset(
 export function useAssetApi() {
     const { getToken } = useAuth();
 
-    // ✅ Ref keeps getToken current without triggering re-renders
     const getTokenRef = React.useRef(getToken);
     React.useLayoutEffect(() => {
         getTokenRef.current = getToken;
     });
 
-    // ✅ Empty deps — never changes reference
     const withToken = React.useCallback(
         async <T,>(fn: (token: string) => Promise<T>): Promise<T> => {
             const token = await getTokenRef.current({ template: JWT_TEMPLATE });
@@ -384,6 +386,7 @@ export function useAssetApi() {
     const updateStatus = React.useCallback(
         (id: string, status: AssetStatus) =>
             withToken(async (token) => {
+                // Fetch the current asset first to get all existing field values
                 const getRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
                 });
@@ -400,6 +403,8 @@ export function useAssetApi() {
                     status,
                     locationId: current.locationId,
                     assignedToId: current.assignedToId ?? "",
+                    // Carry supplierId forward — required by the backend
+                    supplierId: raw.supplierId != null ? String(raw.supplierId) : "",
                     purchaseDate: current.purchaseDate ?? "",
                     warrantyEnd: current.warrantyEnd ?? "",
                 };

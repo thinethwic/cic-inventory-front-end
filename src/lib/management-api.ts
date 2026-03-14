@@ -101,20 +101,22 @@ export function useManagementApi() {
         return { employees, departments, locations, suppliers };
     }, [getAuthToken]);
 
-    // Lightweight load for Assets page
+    // Lightweight load for Assets page — includes suppliers for the dropdown
     const loadAssetLookups = React.useCallback(async (): Promise<{
         employees: Employee[];
         locations: Location[];
+        suppliers: Supplier[];
     }> => {
         const token = await getAuthToken();
         if (!token) throw new Error("Not authenticated");
 
-        const [employees, locations] = await Promise.all([
+        const [employees, locations, suppliers] = await Promise.all([
             apiFetch<Employee[] | SpringPage<Employee>>(token, "/employees").then(unwrap),
             apiFetch<Location[] | SpringPage<Location>>(token, "/locations").then(unwrap),
+            apiFetch<Supplier[] | SpringPage<Supplier>>(token, "/suppliers").then(unwrap),
         ]);
 
-        return { employees, locations };
+        return { employees, locations, suppliers };
     }, [getAuthToken]);
 
     const createEmployee = React.useCallback(
