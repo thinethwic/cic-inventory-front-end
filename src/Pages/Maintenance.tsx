@@ -51,7 +51,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import type { Asset, Supplier } from "@/types";
+import type { Asset } from "@/types";
 import type {
   Maintenance,
   MaintenanceFormState,
@@ -93,20 +93,12 @@ function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function MaintenancePage() {
-  const {
-    getAll,
-    getAssets,
-    getSuppliers,
-    create,
-    update,
-    remove,
-    markCompleted,
-  } = useMaintenanceApi();
+  const { getAll, getAssets, create, update, remove, markCompleted } =
+    useMaintenanceApi();
 
   const { updateStatus: updateAssetStatus } = useAssetApi();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
-  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
   const [rows, setRows] = React.useState<Maintenance[]>([]);
   const [loading, setLoading] = React.useState(false);
 
@@ -161,15 +153,6 @@ export default function MaintenancePage() {
       });
   }, [getAssets]);
 
-  React.useEffect(() => {
-    getSuppliers()
-      .then((data) => setSuppliers(Array.isArray(data) ? data : []))
-      .catch((e) => {
-        console.error("Failed to load suppliers:", e);
-        setSuppliers([]);
-      });
-  }, [getSuppliers]);
-
   // ── Client-side filter ──────────────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
@@ -177,7 +160,7 @@ export default function MaintenancePage() {
     return rows.filter((m) => {
       const matchText =
         !text ||
-        `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""} ${m.supplierName ?? ""}`
+        `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""}`
           .toLowerCase()
           .includes(text);
 
@@ -218,7 +201,6 @@ export default function MaintenancePage() {
       ticketNo: m.ticketNo,
       assetId: m.assetId,
       assetCode: m.assetCode,
-      supplierId: m.supplierId,
       issueTitle: m.issueTitle,
       description: m.description ?? "",
       priority: m.priority,
@@ -240,7 +222,6 @@ export default function MaintenancePage() {
   // ── Validate ────────────────────────────────────────────────────────────────
   const validate = (): string | null => {
     if (!form.assetId) return "Asset is required.";
-    if (!form.supplierId) return "Supplier is required.";
     if (!form.issueTitle.trim()) return "Issue title is required.";
     if (!form.reportedDate) return "Reported date is required.";
     return null;
@@ -269,11 +250,7 @@ export default function MaintenancePage() {
         const updated = await update(editingId, form);
         setRows((p) => p.map((x) => (x.id === editingId ? updated : x)));
       } else {
-        // On create, backend generates ticketNo
-        const createPayload = {
-          ...form,
-        };
-        const created = await create(createPayload as MaintenanceFormState);
+        const created = await create(form as MaintenanceFormState);
         setRows((p) => [created, ...p]);
       }
 
@@ -368,7 +345,7 @@ export default function MaintenancePage() {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="ticket, asset code, issue, supplier..."
+              placeholder="ticket, asset code, issue, assigned to..."
             />
           </div>
 
@@ -476,9 +453,6 @@ export default function MaintenancePage() {
                           {m.assignedTo
                             ? `Assigned: ${m.assignedTo}`
                             : "Unassigned"}
-                          {m.supplierName
-                            ? ` • Supplier: ${m.supplierName}`
-                            : ""}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -560,7 +534,7 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1 md:col-span-2">
               <div className="text-xs text-muted-foreground">Asset *</div>
               <Select
                 value={form.assetId}
@@ -574,31 +548,6 @@ export default function MaintenancePage() {
                   {assets.map((a) => (
                     <SelectItem key={a.id} value={String(a.id)}>
                       {a.assetCode} • {a.brand} {a.model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Supplier *</div>
-              <Select
-                value={form.supplierId ? String(form.supplierId) : ""}
-                onValueChange={(v) =>
-                  setForm((p) => ({
-                    ...p,
-                    supplierId: v,
-                  }))
-                }
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select supplier" />
-                </SelectTrigger>
-                <SelectContent>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

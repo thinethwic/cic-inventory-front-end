@@ -69,7 +69,7 @@ export type AssetFormState = {
     serialNo: string;
     status: AssetStatus;
     locationId: string;
-    assignedToId?: string;      // FIX: was assignedEmployeeId — must match Assets.tsx usage
+    assignedToId?: string;
     purchaseDate?: string;
     warrantyEnd?: string;
     supplierId?: string;
@@ -84,7 +84,7 @@ export const emptyAssetForm: AssetFormState = {
     serialNo: "",
     status: "Available",
     locationId: "",
-    assignedToId: "",           // FIX: was assignedEmployeeId
+    assignedToId: "",
     purchaseDate: "",
     warrantyEnd: "",
     supplierId: "",
@@ -92,8 +92,8 @@ export const emptyAssetForm: AssetFormState = {
 
 // ─── Entity base — backend returns Long (number) for id ───────────────────────
 export type EntityBase = {
-    id: number;             // FIX: was string — backend Long maps to number
-    createdAt?: string;     // YYYY-MM-DD (optional: not always returned)
+    id: number;
+    createdAt?: string;
 };
 
 export type Department = EntityBase & {
@@ -123,9 +123,6 @@ export type SystemUser = EntityBase & {
 
 export type EmployeeStatus = "ACTIVE" | "INACTIVE";
 
-// FIX: department and location are nested objects from the backend (not flat strings).
-// FIX: employeeStatus replaces status to match backend field name.
-// FIX: id is number (Long), inherited correctly from EntityBase now.
 export type Employee = EntityBase & {
     empId: string;
     name: string;
@@ -133,7 +130,7 @@ export type Employee = EntityBase & {
     location: { id: number; name: string; code: string } | null;
     phone_no?: string;
     email?: string;
-    employeeStatus?: EmployeeStatus;  // FIX: was "status" — backend field is employeeStatus
+    employeeStatus?: EmployeeStatus;
 };
 
 // Reusable helper
@@ -158,18 +155,12 @@ export const maintenancePriorityOptions: MaintenancePriority[] = [
     "Critical",
 ];
 
-// Keep assetId as a plain string on the frontend.
-// The API layer (api.ts) converts it to { id: number } before sending to backend,
-// and flattens it back to a string when receiving from backend.
-// In your types.ts — update these two types:
-
 export type Maintenance = {
     id: string;
     ticketNo: string;
     assetId: string;
     assetCode: string;
-    supplierId: string;       // ✅ replaces supplier name string
-    supplierName: string;     // ✅ display only, from backend response
+    // supplierId and supplierName removed
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
@@ -185,7 +176,7 @@ export type MaintenanceFormState = {
     ticketNo: string;
     assetId: string;
     assetCode: string;
-    supplierId: string;       // ✅ Long ID sent to backend
+    // supplierId removed
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
@@ -201,7 +192,7 @@ export const emptyMaintenanceForm: MaintenanceFormState = {
     ticketNo: "",
     assetId: "",
     assetCode: "",
-    supplierId: "",           // ✅ was supplier: ""
+    // supplierId removed
     issueTitle: "",
     description: "",
     priority: "Medium",

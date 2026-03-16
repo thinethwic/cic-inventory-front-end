@@ -14,6 +14,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
 } from "lucide-react";
 
 import { useAuth } from "@clerk/clerk-react";
@@ -78,6 +81,73 @@ import QRCodeLib from "qrcode";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const CUSTOM_CATEGORY_VALUE = "__CUSTOM_CATEGORY__";
+
+// ─── Sorting ──────────────────────────────────────────────────────────────────
+type SortKey =
+  | "assetCode"
+  | "category"
+  | "brand"
+  | "serialNo"
+  | "status"
+  | "location"
+  | "supplierName";
+
+type SortDir = "asc" | "desc";
+
+function sortAssets(
+  assets: Asset[],
+  key: SortKey | null,
+  dir: SortDir,
+): Asset[] {
+  if (!key) return assets;
+
+  return [...assets].sort((a, b) => {
+    const av = (a[key] ?? "").toString().toLowerCase();
+    const bv = (b[key] ?? "").toString().toLowerCase();
+    if (av < bv) return dir === "asc" ? -1 : 1;
+    if (av > bv) return dir === "asc" ? 1 : -1;
+    return 0;
+  });
+}
+
+// ─── Sortable column header ───────────────────────────────────────────────────
+interface SortableHeadProps {
+  label: string;
+  sortKey: SortKey;
+  current: SortKey | null;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  current,
+  dir,
+  onSort,
+}: SortableHeadProps) {
+  const active = current === sortKey;
+
+  return (
+    <TableHead
+      className="cursor-pointer select-none whitespace-nowrap"
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          dir === "asc" ? (
+            <ChevronUp className="h-3.5 w-3.5 text-foreground" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 text-foreground" />
+          )
+        ) : (
+          <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground/50" />
+        )}
+      </span>
+    </TableHead>
+  );
+}
 
 // ─── QR Dialog ────────────────────────────────────────────────────────────────
 interface QRDialogProps {
@@ -324,11 +394,23 @@ export default function Assets() {
     "All",
   );
   const [categoryFilter, setCategoryFilter] = React.useState<string>("All");
-  // Stores the selected supplier id as a string, or "All"
   const [supplierFilter, setSupplierFilter] = React.useState<string>("All");
 
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
+
+  // ── Sorting state ──────────────────────────────────────────────────────────
+  const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = React.useState<SortDir>("asc");
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
 
   const [scanValue, setScanValue] = React.useState("");
   const scanRef = React.useRef<HTMLInputElement | null>(null);
@@ -348,7 +430,7 @@ export default function Assets() {
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
 
-  // ── Fetch page from server ──
+  // ── Fetch page ─────────────────────────────────────────────────────────────
   const loadPage = React.useCallback(async () => {
     if (!isLoaded || !isSignedIn) {
       setPageData({
@@ -363,13 +445,11 @@ export default function Assets() {
     }
 
     if (loadingRef.current) return;
-
     loadingRef.current = true;
     setPageLoading(true);
 
     try {
       const data = await getPage({ page: page - 1, size: pageSize });
-
       setPageData({
         content: Array.isArray(data?.content) ? data.content : [],
         totalElements: data?.totalElements ?? 0,
@@ -396,7 +476,7 @@ export default function Assets() {
     loadPage();
   }, [loadPage]);
 
-  // ── Build dynamic categories ──
+  // ── Dynamic categories ─────────────────────────────────────────────────────
   React.useEffect(() => {
     const categoriesFromAssets = pageData.content
       .map((a) => a.category?.trim())
@@ -409,7 +489,7 @@ export default function Assets() {
     setAllCategoryOptions(merged);
   }, [pageData.content]);
 
-  // ── Load lookups (locations, employees, suppliers) ──
+  // ── Load lookups ───────────────────────────────────────────────────────────
   const loadLookups = React.useCallback(
     async (force = false) => {
       if (!isLoaded || !isSignedIn) {
@@ -440,14 +520,10 @@ export default function Assets() {
     [isLoaded, isSignedIn, managementApi],
   );
 
-  // Reset cache whenever auth becomes ready so loadLookups fires on sign-in
   React.useEffect(() => {
-    if (isLoaded && isSignedIn) {
-      lookupsLoadedRef.current = false;
-    }
+    if (isLoaded && isSignedIn) lookupsLoadedRef.current = false;
   }, [isLoaded, isSignedIn]);
 
-  // Load eagerly on mount and after auth so supplier filter is populated
   React.useEffect(() => {
     loadLookups();
   }, [loadLookups]);
@@ -460,11 +536,11 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
-  // ── Frontend-only filtering ──
+  // ── Filter then sort ───────────────────────────────────────────────────────
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
 
-    return pageData.content.filter((asset) => {
+    const filtered = pageData.content.filter((asset) => {
       const matchesSearch =
         !searchText ||
         asset.assetCode?.toLowerCase().includes(searchText) ||
@@ -483,7 +559,6 @@ export default function Assets() {
       const matchesCategory =
         categoryFilter === "All" || asset.category === categoryFilter;
 
-      // Match on supplierId (numeric FK stored on the asset)
       const matchesSupplier =
         supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
 
@@ -491,20 +566,19 @@ export default function Assets() {
         matchesSearch && matchesStatus && matchesCategory && matchesSupplier
       );
     });
-  }, [pageData.content, q, statusFilter, categoryFilter, supplierFilter]);
 
-  // ── Filter handlers ──
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) =>
-    setQ(e.target.value);
+    return sortAssets(filtered, sortKey, sortDir);
+  }, [
+    pageData.content,
+    q,
+    statusFilter,
+    categoryFilter,
+    supplierFilter,
+    sortKey,
+    sortDir,
+  ]);
 
-  const handleStatusFilter = (v: string) =>
-    setStatusFilter(v as AssetStatus | "All");
-
-  const handleCategoryFilter = (v: string) => setCategoryFilter(v);
-
-  const handleSupplierFilter = (v: string) => setSupplierFilter(v);
-
-  // ── Form helpers ──
+  // ── Form helpers ───────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm(emptyAssetForm);
@@ -527,8 +601,6 @@ export default function Assets() {
     const existingCategory = asset.category ?? "Laptop";
     const isPredefinedCategory = allCategoryOptions.includes(existingCategory);
 
-    // Resolve supplierId: prefer the numeric FK on the asset, otherwise
-    // match by the resolved name string the API may have returned
     const matchingSupplier =
       suppliers.find((s) => s.id === asset.supplierId) ??
       suppliers.find((s) => s.name?.trim() === asset.supplierName?.trim());
@@ -558,15 +630,13 @@ export default function Assets() {
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
     if (!form.supplierId?.trim()) return "Supplier is required.";
-
     if (form.category === CUSTOM_CATEGORY_VALUE && !customCategory.trim()) {
       return "Custom category is required.";
     }
-
     return null;
   };
 
-  // ── Save ──
+  // ── Save ───────────────────────────────────────────────────────────────────
   const save = async () => {
     const err = validateForm();
     if (err) {
@@ -619,7 +689,7 @@ export default function Assets() {
     }
   };
 
-  // ── Delete ──
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteId || !isLoaded || !isSignedIn) return;
 
@@ -666,7 +736,7 @@ export default function Assets() {
     }
   };
 
-  // ── Barcode scan ──
+  // ── Barcode scan ───────────────────────────────────────────────────────────
   const findByBarcode = async (barcode: string) => {
     const code = barcode.trim();
     if (!code || !isLoaded || !isSignedIn) return;
@@ -783,14 +853,17 @@ export default function Assets() {
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
               value={q}
-              onChange={handleSearchChange}
+              onChange={(e) => setQ(e.target.value)}
               placeholder="asset code, serial, model, supplier..."
             />
           </div>
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
-            <Select value={statusFilter} onValueChange={handleStatusFilter}>
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as AssetStatus | "All")}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
@@ -807,7 +880,7 @@ export default function Assets() {
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Category</div>
-            <Select value={categoryFilter} onValueChange={handleCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Select category" />
               </SelectTrigger>
@@ -822,10 +895,9 @@ export default function Assets() {
             </Select>
           </div>
 
-          {/* ── Supplier filter — driven by registered suppliers table ── */}
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Supplier</div>
-            <Select value={supplierFilter} onValueChange={handleSupplierFilter}>
+            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Select supplier" />
               </SelectTrigger>
@@ -851,12 +923,28 @@ export default function Assets() {
       {/* ── Asset Table Card ── */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            Asset List{" "}
-            <span className="text-muted-foreground">
-              ({filteredAssets.length})
-            </span>
-          </CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">
+              Asset List{" "}
+              <span className="text-muted-foreground">
+                ({filteredAssets.length})
+              </span>
+            </CardTitle>
+            {sortKey && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground"
+                onClick={() => {
+                  setSortKey(null);
+                  setSortDir("asc");
+                }}
+                type="button"
+              >
+                Clear sort
+              </Button>
+            )}
+          </div>
         </CardHeader>
 
         <CardContent className="p-0">
@@ -864,14 +952,57 @@ export default function Assets() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Asset Code</TableHead>
+                  <SortableHead
+                    label="Asset Code"
+                    sortKey="assetCode"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  {/* Barcode is not sortable — no meaningful order */}
                   <TableHead>Barcode</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Serial No</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Supplier</TableHead>
+                  <SortableHead
+                    label="Category"
+                    sortKey="category"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableHead
+                    label="Model"
+                    sortKey="brand"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableHead
+                    label="Serial No"
+                    sortKey="serialNo"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableHead
+                    label="Status"
+                    sortKey="status"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableHead
+                    label="Location"
+                    sortKey="location"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableHead
+                    label="Supplier"
+                    sortKey="supplierName"
+                    current={sortKey}
+                    dir={sortDir}
+                    onSort={handleSort}
+                  />
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -934,7 +1065,6 @@ export default function Assets() {
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
                               onClick={async () => {
@@ -944,13 +1074,10 @@ export default function Assets() {
                             >
                               <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
-
                             <DropdownMenuItem onClick={() => setQrAsset(a)}>
                               <QrCode className="mr-2 h-4 w-4" /> View QR Code
                             </DropdownMenuItem>
-
                             <DropdownMenuSeparator />
-
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => {
@@ -1045,7 +1172,6 @@ export default function Assets() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-
               {form.category === CUSTOM_CATEGORY_VALUE && (
                 <Input
                   value={customCategory}
@@ -1184,7 +1310,6 @@ export default function Assets() {
               </Select>
             </div>
 
-            {/* ── Supplier — required, from registered suppliers table ── */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Supplier *</div>
               <Select
@@ -1254,7 +1379,6 @@ export default function Assets() {
             >
               Cancel
             </Button>
-
             <Button onClick={save} disabled={saving} type="button">
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingId ? "Save Changes" : "Create Asset"}
@@ -1299,7 +1423,6 @@ export default function Assets() {
             >
               Cancel
             </AlertDialogCancel>
-
             <Button
               variant="destructive"
               onClick={confirmDelete}

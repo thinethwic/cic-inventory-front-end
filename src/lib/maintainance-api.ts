@@ -1,7 +1,7 @@
 // src/lib/maintainance-api.ts
 import * as React from "react";
 import { useAuth } from "@clerk/clerk-react";
-import type { Asset, Supplier } from "@/types";
+import type { Asset } from "@/types";
 import type {
     Maintenance,
     MaintenanceFormState,
@@ -74,20 +74,18 @@ function reqBody(payload: unknown): RequestInit {
 }
 
 // ─── Frontend → Backend DTO ───────────────────────────────────────────────────
-// Must match MaintenanceDTO exactly:
-// ticketNo, assetId (Long), supplierId (Long), issueTitle, description,
+// Matches MaintenanceDTO: ticketNo, assetId (Long), issueTitle, description,
 // priority (ENUM), status (ENUM), reportedDate, dueDate, assignedTo, cost, notes
-function toBackendDto(
-    dto: MaintenanceFormState
-): Record<string, unknown> {
+// supplierId removed
+function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
     return {
         ticketNo: dto.ticketNo,
         assetId: Number(dto.assetId),
-        supplierId: Number(dto.supplierId),       // ✅ Long, not supplier name
+        // supplierId removed
         issueTitle: dto.issueTitle,
         description: dto.description || null,
-        priority: dto.priority?.toUpperCase(),    // e.g. HIGH
-        status: dto.status?.toUpperCase().replace(/\s+/g, "_"), // e.g. IN_PROGRESS
+        priority: dto.priority?.toUpperCase(),                          // e.g. HIGH
+        status: dto.status?.toUpperCase().replace(/\s+/g, "_"),         // e.g. IN_PROGRESS
         reportedDate: dto.reportedDate,
         dueDate: dto.dueDate || null,
         assignedTo: dto.assignedTo || null,
@@ -112,17 +110,16 @@ const PRIORITY_MAP: Record<string, MaintenancePriority> = {
 };
 
 function fromBackendRow(raw: Record<string, unknown>): Maintenance {
-    // Backend returns full asset object due to @ManyToOne
+    // Backend returns full asset object due to @OneToOne
     const asset = raw.asset as Record<string, unknown> | undefined;
-    const supplier = raw.supplier as Record<string, unknown> | undefined;
+    // supplier field removed
 
     return {
         id: String(raw.id),
         ticketNo: raw.ticketNo as string,
         assetId: asset?.id != null ? String(asset.id) : String(raw.assetId ?? ""),
         assetCode: (asset?.assetCode as string) ?? "",
-        supplierId: supplier?.id != null ? String(supplier.id) : String(raw.supplierId ?? ""),
-        supplierName: (supplier?.name as string) ?? "",
+        // supplierId and supplierName removed
         issueTitle: (raw.issueTitle as string) ?? "",
         description: (raw.description as string) ?? "",
         priority: (PRIORITY_MAP[raw.priority as string] ?? raw.priority) as MaintenancePriority,
@@ -219,15 +216,7 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
-    const getSuppliers = React.useCallback(
-        () =>
-            withToken((t) =>
-                apiFetch<Supplier[] | SpringPage<Supplier>>(t, "/suppliers").then(
-                    (res) => (Array.isArray(res) ? res : res.content)
-                )
-            ),
-        [withToken]
-    );
+    // getSuppliers removed
 
-    return { getAll, create, update, remove, markCompleted, getAssets, getSuppliers };
+    return { getAll, create, update, remove, markCompleted, getAssets };
 }

@@ -13,10 +13,27 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { Download, FileText, RefreshCw } from "lucide-react";
+import { Download, FileText, RefreshCw, Filter } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 import type { Asset, Maintenance } from "@/types";
 import { useAssetApi } from "@/lib/api";
@@ -24,6 +41,7 @@ import { useMaintenanceApi } from "@/lib/maintainance-api";
 import {
   generateAssetReport,
   generateMaintenanceReport,
+  generateFilteredAssetReport,
 } from "@/utils/pdfReports";
 
 type ChartRow = { name: string; value: number };
@@ -36,6 +54,18 @@ function buildCountData<T extends string>(items: T[]): ChartRow[] {
   return Object.entries(map).map(([name, value]) => ({ name, value }));
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const variant =
+    status === "Available"
+      ? "secondary"
+      : status === "Assigned"
+        ? "default"
+        : status === "In Repair"
+          ? "destructive"
+          : "outline";
+  return <Badge variant={variant}>{status}</Badge>;
+}
+
 export default function ReportsPage() {
   const { getAll: getAllAssets } = useAssetApi();
   const { getAll: getAllMaintenance } = useMaintenanceApi();
@@ -45,7 +75,12 @@ export default function ReportsPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ── Fetch both on mount ─────────────────────────────────────────────────────
+  // ── Filtered report state ───────────────────────────────────────────────────
+  const [filterSupplier, setFilterSupplier] = React.useState<string>("All");
+  const [filterDateFrom, setFilterDateFrom] = React.useState("");
+  const [filterDateTo, setFilterDateTo] = React.useState("");
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
   const fetchAll = React.useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -68,21 +103,13 @@ export default function ReportsPage() {
     fetchAll();
   }, [fetchAll]);
 
-  // ── KPIs ────────────────────────────────────────────────────────────────────
-  const totalAssets = assets.length;
-  const availableAssets = assets.filter((a) => a.status === "Available").length;
-  const assignedAssets = assets.filter((a) => a.status === "Assigned").length;
-  const repairAssets = assets.filter((a) => a.status === "In Repair").length;
-  const disposedAssets = assets.filter((a) => a.status === "Disposed").length;
-
-  const totalMaintenance = maintenance.length;
-  const openMaintenance = maintenance.filter(
-    (m) => m.status !== "Completed" && m.status !== "Cancelled",
-  ).length;
-  const totalMaintenanceCost = maintenance.reduce(
-    (sum, m) => sum + (typeof m.cost === "number" ? m.cost : 0),
-    0,
-  );
+  // ── Unique suppliers derived from asset list ────────────────────────────────
+  const supplierOptions = React.useMemo(() => {
+    const names = assets
+      .map((a) => a.supplierName)
+      .filter((n): n is string => !!n);
+    return Array.from(new Set(names)).sort();
+  }, [assets]);
 
   // ── Chart data ──────────────────────────────────────────────────────────────
   const assetStatusData = buildCountData(assets.map((a) => a.status));
@@ -93,6 +120,38 @@ export default function ReportsPage() {
   const maintenancePriorityData = buildCountData(
     maintenance.map((m) => m.priority),
   );
+
+  // ── Filtered assets ─────────────────────────────────────────────────────────
+  const filteredAssets = React.useMemo(() => {
+    return assets.filter((a) => {
+      const matchSupplier =
+        filterSupplier === "All" || a.supplierName === filterSupplier;
+      const matchFrom =
+        !filterDateFrom ||
+        (a.purchaseDate != null && a.purchaseDate >= filterDateFrom);
+      const matchTo =
+        !filterDateTo ||
+        (a.purchaseDate != null && a.purchaseDate <= filterDateTo);
+      return matchSupplier && matchFrom && matchTo;
+    });
+  }, [assets, filterSupplier, filterDateFrom, filterDateTo]);
+
+  const hasActiveFilters =
+    filterSupplier !== "All" || !!filterDateFrom || !!filterDateTo;
+
+  const handleDownloadFiltered = () => {
+    generateFilteredAssetReport(filteredAssets, {
+      supplierName: filterSupplier !== "All" ? filterSupplier : undefined,
+      purchaseDateFrom: filterDateFrom || undefined,
+      purchaseDateTo: filterDateTo || undefined,
+    });
+  };
+
+  const clearFilters = () => {
+    setFilterSupplier("All");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+  };
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -119,7 +178,6 @@ export default function ReportsPage() {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-
           <Button
             onClick={() => generateAssetReport(assets)}
             className="gap-2"
@@ -129,7 +187,6 @@ export default function ReportsPage() {
             <Download className="h-4 w-4" />
             Assets PDF
           </Button>
-
           <Button
             onClick={() => generateMaintenanceReport(maintenance)}
             variant="secondary"
@@ -152,70 +209,17 @@ export default function ReportsPage() {
 
       {/* Loading skeleton */}
       {loading ? (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <Card key={i}>
-              <CardContent className="py-8">
-                <div className="h-6 w-16 animate-pulse rounded bg-muted mx-auto" />
+              <CardContent className="py-16">
+                <div className="h-6 w-32 animate-pulse rounded bg-muted mx-auto" />
               </CardContent>
             </Card>
           ))}
         </div>
       ) : (
         <>
-          {/* KPI Cards */}
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Total Assets</CardTitle>
-              </CardHeader>
-              <CardContent className="text-2xl font-bold">
-                {totalAssets}
-              </CardContent>
-              <CardContent className="pt-0 text-xs text-muted-foreground">
-                Available: {availableAssets} • Assigned: {assignedAssets}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Assets in Repair</CardTitle>
-              </CardHeader>
-              <CardContent className="text-2xl font-bold">
-                {repairAssets}
-              </CardContent>
-              <CardContent className="pt-0 text-xs text-muted-foreground">
-                Disposed: {disposedAssets}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Maintenance Tickets</CardTitle>
-              </CardHeader>
-              <CardContent className="text-2xl font-bold">
-                {totalMaintenance}
-              </CardContent>
-              <CardContent className="pt-0 text-xs text-muted-foreground">
-                Open: {openMaintenance}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">
-                  Total Maintenance Cost
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="text-2xl font-bold">
-                {totalMaintenanceCost.toLocaleString()}
-              </CardContent>
-              <CardContent className="pt-0 text-xs text-muted-foreground">
-                (based on entered costs)
-              </CardContent>
-            </Card>
-          </div>
-
           {/* Charts Row 1 */}
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
@@ -337,6 +341,154 @@ export default function ReportsPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* ── Filtered Asset Report ─────────────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-base">
+                    Filtered Asset Report
+                  </CardTitle>
+                  {hasActiveFilters && (
+                    <span className="text-xs text-muted-foreground">
+                      — {filteredAssets.length} result
+                      {filteredAssets.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {hasActiveFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearFilters}
+                      type="button"
+                    >
+                      Clear filters
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="gap-2"
+                    onClick={handleDownloadFiltered}
+                    type="button"
+                    disabled={filteredAssets.length === 0}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download PDF
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Supplier</div>
+                  <Select
+                    value={filterSupplier}
+                    onValueChange={setFilterSupplier}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All suppliers" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Suppliers</SelectItem>
+                      {supplierOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    Purchase Date From
+                  </div>
+                  <Input
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    Purchase Date To
+                  </div>
+                  <Input
+                    type="date"
+                    value={filterDateTo}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Asset Code</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Model</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Location</TableHead>
+                      <TableHead>Supplier</TableHead>
+                      <TableHead>Purchase Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredAssets.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={7}
+                          className="py-8 text-center text-muted-foreground"
+                        >
+                          No assets match the selected filters.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredAssets.slice(0, 50).map((a) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="font-medium">
+                            {a.assetCode}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.category}
+                          </TableCell>
+                          <TableCell>
+                            {a.brand} {a.model}
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={a.status} />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.location}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.supplierName ?? "-"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.purchaseDate ?? "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                {filteredAssets.length > 50 && (
+                  <div className="border-t px-4 py-2 text-xs text-muted-foreground">
+                    Showing first 50 of {filteredAssets.length} results. PDF
+                    download includes all {filteredAssets.length} records.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
