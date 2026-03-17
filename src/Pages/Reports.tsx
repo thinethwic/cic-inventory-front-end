@@ -20,6 +20,10 @@ import {
   RefreshCw,
   Filter,
   X,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -115,6 +119,22 @@ export default function ReportsPage() {
   const [filterDateFrom, setFilterDateFrom] = React.useState("");
   const [filterDateTo, setFilterDateTo] = React.useState("");
 
+  // ── Pagination state for the filtered table ───────────────────────────────
+  const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+  const [tablePage, setTablePage] = React.useState(1);
+  const [tablePageSize, setTablePageSize] = React.useState(25);
+
+  // Reset to page 1 whenever filters change
+  React.useEffect(() => {
+    setTablePage(1);
+  }, [
+    filterSupplier,
+    filterLocation,
+    filterAssignedTo,
+    filterDateFrom,
+    filterDateTo,
+  ]);
+
   // ── Fetch ───────────────────────────────────────────────────────────────────
   const fetchAll = React.useCallback(async () => {
     setLoading(true);
@@ -199,6 +219,20 @@ export default function ReportsPage() {
     filterDateFrom,
     filterDateTo,
   ]);
+
+  // Slice of filteredAssets for the current page
+  const tableTotalPages = Math.max(
+    Math.ceil(filteredAssets.length / tablePageSize),
+    1,
+  );
+  const paginatedAssets = React.useMemo(() => {
+    const start = (tablePage - 1) * tablePageSize;
+    return filteredAssets.slice(start, start + tablePageSize);
+  }, [filteredAssets, tablePage, tablePageSize]);
+
+  const tableFrom =
+    filteredAssets.length === 0 ? 0 : (tablePage - 1) * tablePageSize + 1;
+  const tableTo = Math.min(tablePage * tablePageSize, filteredAssets.length);
 
   const activeFilters: { label: string; onRemove: () => void }[] = [
     ...(filterSupplier !== "All"
@@ -664,7 +698,7 @@ export default function ReportsPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredAssets.slice(0, 50).map((a) => (
+                      paginatedAssets.map((a) => (
                         <TableRow key={a.id}>
                           <TableCell className="font-medium">
                             {a.assetCode}
@@ -696,12 +730,90 @@ export default function ReportsPage() {
                   </TableBody>
                 </Table>
 
-                {filteredAssets.length > 50 && (
-                  <div className="border-t px-4 py-2 text-xs text-muted-foreground">
-                    Showing first 50 of {filteredAssets.length} results. PDF
-                    download includes all {filteredAssets.length} records.
+                {/* ── Pagination controls ── */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+                  <p className="text-sm text-muted-foreground">
+                    {filteredAssets.length === 0
+                      ? "No results"
+                      : `Showing ${tableFrom}–${tableTo} of ${filteredAssets.length}`}
+                  </p>
+
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">
+                        Rows per page
+                      </span>
+                      <Select
+                        value={String(tablePageSize)}
+                        onValueChange={(v) => {
+                          setTablePageSize(Number(v));
+                          setTablePage(1);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[70px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAGE_SIZE_OPTIONS.map((s) => (
+                            <SelectItem key={s} value={String(s)}>
+                              {s}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        type="button"
+                        onClick={() => setTablePage(1)}
+                        disabled={tablePage === 1}
+                        title="First page"
+                      >
+                        <ChevronsLeft className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        type="button"
+                        onClick={() => setTablePage((p) => p - 1)}
+                        disabled={tablePage === 1}
+                        title="Previous page"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+                        Page {tablePage} of {tableTotalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        type="button"
+                        onClick={() => setTablePage((p) => p + 1)}
+                        disabled={tablePage >= tableTotalPages}
+                        title="Next page"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8"
+                        type="button"
+                        onClick={() => setTablePage(tableTotalPages)}
+                        disabled={tablePage >= tableTotalPages}
+                        title="Last page"
+                      >
+                        <ChevronsRight className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             </CardContent>
           </Card>
