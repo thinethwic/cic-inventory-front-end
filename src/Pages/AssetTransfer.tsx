@@ -122,7 +122,7 @@ function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
 
 /**
  * Builds the payload for updateAsset (PUT /api/assets/{id}).
- * The transfer record itself only needs assetId, transferType, transferDate, reason.
+ * Carries all existing asset fields forward, only updating what the transfer changes.
  */
 function buildAssetPayload(args: {
   asset: Asset;
@@ -154,6 +154,8 @@ function buildAssetPayload(args: {
     assignedToId: nextEmployeeId,
     purchaseDate: asset.purchaseDate ?? "",
     warrantyEnd: asset.warrantyEnd ?? "",
+    // Carry supplierId forward — required by backend @NotNull
+    supplierId: asset.supplierId != null ? String(asset.supplierId) : "",
   };
 }
 
@@ -656,6 +658,18 @@ export default function AssetTransferPage() {
                             <p className="font-medium">Barcode</p>
                             <p className="text-muted-foreground">
                               {selectedAsset.barcode}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedAsset.supplierName && (
+                        <div className="flex items-start gap-2">
+                          <Package className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                          <div>
+                            <p className="font-medium">Supplier</p>
+                            <p className="text-muted-foreground">
+                              {selectedAsset.supplierName}
                             </p>
                           </div>
                         </div>
