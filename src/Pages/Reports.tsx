@@ -13,7 +13,14 @@ import {
   CartesianGrid,
   Legend,
 } from "recharts";
-import { Download, FileText, RefreshCw, Filter } from "lucide-react";
+import {
+  Download,
+  FileText,
+  FileSpreadsheet,
+  RefreshCw,
+  Filter,
+  X,
+} from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +49,9 @@ import {
   generateAssetReport,
   generateMaintenanceReport,
   generateFilteredAssetReport,
+  generateAssetReportExcel,
+  generateMaintenanceReportExcel,
+  generateFilteredAssetReportExcel,
 } from "@/utils/pdfReports";
 
 type ChartRow = { name: string; value: number };
@@ -66,6 +76,29 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={variant}>{status}</Badge>;
 }
 
+// ─── Active filter pill ───────────────────────────────────────────────────────
+function FilterPill({
+  label,
+  onRemove,
+}: {
+  label: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border bg-muted px-2.5 py-0.5 text-xs font-medium">
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="ml-0.5 rounded-full hover:text-destructive"
+        aria-label={`Remove ${label} filter`}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
 export default function ReportsPage() {
   const { getAll: getAllAssets } = useAssetApi();
   const { getAll: getAllMaintenance } = useMaintenanceApi();
@@ -75,8 +108,10 @@ export default function ReportsPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  // ── Filtered report state ───────────────────────────────────────────────────
+  // ── Filter state ────────────────────────────────────────────────────────────
   const [filterSupplier, setFilterSupplier] = React.useState<string>("All");
+  const [filterLocation, setFilterLocation] = React.useState<string>("All");
+  const [filterAssignedTo, setFilterAssignedTo] = React.useState<string>("All");
   const [filterDateFrom, setFilterDateFrom] = React.useState("");
   const [filterDateTo, setFilterDateTo] = React.useState("");
 
@@ -103,11 +138,23 @@ export default function ReportsPage() {
     fetchAll();
   }, [fetchAll]);
 
-  // ── Unique suppliers derived from asset list ────────────────────────────────
+  // ── Dropdown options derived from asset list ────────────────────────────────
   const supplierOptions = React.useMemo(() => {
     const names = assets
       .map((a) => a.supplierName)
       .filter((n): n is string => !!n);
+    return Array.from(new Set(names)).sort();
+  }, [assets]);
+
+  const locationOptions = React.useMemo(() => {
+    const names = assets.map((a) => a.location).filter((n): n is string => !!n);
+    return Array.from(new Set(names)).sort();
+  }, [assets]);
+
+  const assignedToOptions = React.useMemo(() => {
+    const names = assets
+      .map((a) => a.assignedTo)
+      .filter((n): n is string => !!n && n.trim() !== "");
     return Array.from(new Set(names)).sort();
   }, [assets]);
 
@@ -126,31 +173,89 @@ export default function ReportsPage() {
     return assets.filter((a) => {
       const matchSupplier =
         filterSupplier === "All" || a.supplierName === filterSupplier;
+      const matchLocation =
+        filterLocation === "All" || a.location === filterLocation;
+      const matchAssignedTo =
+        filterAssignedTo === "All" || a.assignedTo === filterAssignedTo;
       const matchFrom =
         !filterDateFrom ||
         (a.purchaseDate != null && a.purchaseDate >= filterDateFrom);
       const matchTo =
         !filterDateTo ||
         (a.purchaseDate != null && a.purchaseDate <= filterDateTo);
-      return matchSupplier && matchFrom && matchTo;
+      return (
+        matchSupplier &&
+        matchLocation &&
+        matchAssignedTo &&
+        matchFrom &&
+        matchTo
+      );
     });
-  }, [assets, filterSupplier, filterDateFrom, filterDateTo]);
+  }, [
+    assets,
+    filterSupplier,
+    filterLocation,
+    filterAssignedTo,
+    filterDateFrom,
+    filterDateTo,
+  ]);
 
-  const hasActiveFilters =
-    filterSupplier !== "All" || !!filterDateFrom || !!filterDateTo;
+  const activeFilters: { label: string; onRemove: () => void }[] = [
+    ...(filterSupplier !== "All"
+      ? [
+          {
+            label: `Supplier: ${filterSupplier}`,
+            onRemove: () => setFilterSupplier("All"),
+          },
+        ]
+      : []),
+    ...(filterLocation !== "All"
+      ? [
+          {
+            label: `Location: ${filterLocation}`,
+            onRemove: () => setFilterLocation("All"),
+          },
+        ]
+      : []),
+    ...(filterAssignedTo !== "All"
+      ? [
+          {
+            label: `Assigned To: ${filterAssignedTo}`,
+            onRemove: () => setFilterAssignedTo("All"),
+          },
+        ]
+      : []),
+    ...(filterDateFrom
+      ? [
+          {
+            label: `From: ${filterDateFrom}`,
+            onRemove: () => setFilterDateFrom(""),
+          },
+        ]
+      : []),
+    ...(filterDateTo
+      ? [{ label: `To: ${filterDateTo}`, onRemove: () => setFilterDateTo("") }]
+      : []),
+  ];
+
+  const hasActiveFilters = activeFilters.length > 0;
+
+  const clearFilters = () => {
+    setFilterSupplier("All");
+    setFilterLocation("All");
+    setFilterAssignedTo("All");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+  };
 
   const handleDownloadFiltered = () => {
     generateFilteredAssetReport(filteredAssets, {
       supplierName: filterSupplier !== "All" ? filterSupplier : undefined,
+      location: filterLocation !== "All" ? filterLocation : undefined,
+      assignedTo: filterAssignedTo !== "All" ? filterAssignedTo : undefined,
       purchaseDateFrom: filterDateFrom || undefined,
       purchaseDateTo: filterDateTo || undefined,
     });
-  };
-
-  const clearFilters = () => {
-    setFilterSupplier("All");
-    setFilterDateFrom("");
-    setFilterDateTo("");
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -188,6 +293,16 @@ export default function ReportsPage() {
             Assets PDF
           </Button>
           <Button
+            onClick={() => generateAssetReportExcel(assets)}
+            variant="outline"
+            className="gap-2"
+            type="button"
+            disabled={loading || assets.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Assets Excel
+          </Button>
+          <Button
             onClick={() => generateMaintenanceReport(maintenance)}
             variant="secondary"
             className="gap-2"
@@ -196,6 +311,16 @@ export default function ReportsPage() {
           >
             <FileText className="h-4 w-4" />
             Maintenance PDF
+          </Button>
+          <Button
+            onClick={() => generateMaintenanceReportExcel(maintenance)}
+            variant="outline"
+            className="gap-2"
+            type="button"
+            disabled={loading || maintenance.length === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Maintenance Excel
           </Button>
         </div>
       </div>
@@ -366,7 +491,7 @@ export default function ReportsPage() {
                       onClick={clearFilters}
                       type="button"
                     >
-                      Clear filters
+                      Clear all
                     </Button>
                   )}
                   <Button
@@ -379,12 +504,51 @@ export default function ReportsPage() {
                     <Download className="h-3.5 w-3.5" />
                     Download PDF
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    onClick={() =>
+                      generateFilteredAssetReportExcel(filteredAssets, {
+                        supplierName:
+                          filterSupplier !== "All" ? filterSupplier : undefined,
+                        location:
+                          filterLocation !== "All" ? filterLocation : undefined,
+                        assignedTo:
+                          filterAssignedTo !== "All"
+                            ? filterAssignedTo
+                            : undefined,
+                        purchaseDateFrom: filterDateFrom || undefined,
+                        purchaseDateTo: filterDateTo || undefined,
+                      })
+                    }
+                    type="button"
+                    disabled={filteredAssets.length === 0}
+                  >
+                    <FileSpreadsheet className="h-3.5 w-3.5" />
+                    Download Excel
+                  </Button>
                 </div>
               </div>
+
+              {/* Active filter pills */}
+              {hasActiveFilters && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {activeFilters.map((f) => (
+                    <FilterPill
+                      key={f.label}
+                      label={f.label}
+                      onRemove={f.onRemove}
+                    />
+                  ))}
+                </div>
+              )}
             </CardHeader>
 
             <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
+              {/* Filter controls — 5 columns on large screens */}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {/* Supplier */}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Supplier</div>
                   <Select
@@ -405,6 +569,51 @@ export default function ReportsPage() {
                   </Select>
                 </div>
 
+                {/* Location */}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Location</div>
+                  <Select
+                    value={filterLocation}
+                    onValueChange={setFilterLocation}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All locations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Locations</SelectItem>
+                      {locationOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Assigned To */}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">
+                    Assigned To
+                  </div>
+                  <Select
+                    value={filterAssignedTo}
+                    onValueChange={setFilterAssignedTo}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All employees" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Employees</SelectItem>
+                      {assignedToOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Purchase Date From */}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">
                     Purchase Date From
@@ -416,6 +625,7 @@ export default function ReportsPage() {
                   />
                 </div>
 
+                {/* Purchase Date To */}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">
                     Purchase Date To
@@ -428,6 +638,7 @@ export default function ReportsPage() {
                 </div>
               </div>
 
+              {/* Results table */}
               <div className="rounded-md border">
                 <Table>
                   <TableHeader>
@@ -437,6 +648,7 @@ export default function ReportsPage() {
                       <TableHead>Model</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Location</TableHead>
+                      <TableHead>Assigned To</TableHead>
                       <TableHead>Supplier</TableHead>
                       <TableHead>Purchase Date</TableHead>
                     </TableRow>
@@ -445,7 +657,7 @@ export default function ReportsPage() {
                     {filteredAssets.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={7}
+                          colSpan={8}
                           className="py-8 text-center text-muted-foreground"
                         >
                           No assets match the selected filters.
@@ -460,7 +672,7 @@ export default function ReportsPage() {
                           <TableCell className="text-muted-foreground">
                             {a.category}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-muted-foreground">
                             {a.brand} {a.model}
                           </TableCell>
                           <TableCell>
@@ -468,6 +680,9 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.location}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.assignedTo || "-"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.supplierName ?? "-"}
@@ -480,6 +695,7 @@ export default function ReportsPage() {
                     )}
                   </TableBody>
                 </Table>
+
                 {filteredAssets.length > 50 && (
                   <div className="border-t px-4 py-2 text-xs text-muted-foreground">
                     Showing first 50 of {filteredAssets.length} results. PDF

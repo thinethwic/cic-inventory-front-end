@@ -55,8 +55,9 @@ export interface Asset {
     purchaseDate?: string;
     warrantyEnd?: string;
 
-    supplierId?: number;
-    supplierName?: string;
+    // Supplier — flat fields returned by AssetResponseDTO
+    supplierId?: number;       // numeric FK for filter matching
+    supplierName?: string;     // resolved name for display
 }
 
 // ─── Form state (all optional fields as empty string for controlled inputs) ───
@@ -72,7 +73,7 @@ export type AssetFormState = {
     assignedToId?: string;
     purchaseDate?: string;
     warrantyEnd?: string;
-    supplierId?: string;
+    supplierId: string;        // required — backend @NotNull; "" means not yet selected
 };
 
 export const emptyAssetForm: AssetFormState = {
@@ -87,7 +88,7 @@ export const emptyAssetForm: AssetFormState = {
     assignedToId: "",
     purchaseDate: "",
     warrantyEnd: "",
-    supplierId: "",
+    supplierId: "",            // required field — must be selected before saving
 };
 
 // ─── Entity base — backend returns Long (number) for id ───────────────────────
@@ -160,7 +161,6 @@ export type Maintenance = {
     ticketNo: string;
     assetId: string;
     assetCode: string;
-    // supplierId and supplierName removed
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
@@ -176,7 +176,6 @@ export type MaintenanceFormState = {
     ticketNo: string;
     assetId: string;
     assetCode: string;
-    // supplierId removed
     issueTitle: string;
     description?: string;
     priority: MaintenancePriority;
@@ -192,7 +191,6 @@ export const emptyMaintenanceForm: MaintenanceFormState = {
     ticketNo: "",
     assetId: "",
     assetCode: "",
-    // supplierId removed
     issueTitle: "",
     description: "",
     priority: "Medium",
