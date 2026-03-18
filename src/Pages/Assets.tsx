@@ -787,19 +787,26 @@ export default function Assets() {
     loadPage();
   }, [loadPage]);
 
-  // ── Dynamic categories — merge predefined + current page (full list loaded in loadLookups) ──
-  React.useEffect(() => {
-    const categoriesFromAssets = pageData.content
-      .map((a) => a.category?.trim())
-      .filter((c): c is string => !!c);
+  // ── Load all categories from DB once (separate from pagination) ──────────────
+  const allCategoriesLoadedRef = React.useRef(false);
 
-    setAllCategoryOptions((prev) => {
-      const merged = Array.from(
-        new Set([...categoryOptions, ...prev, ...categoriesFromAssets]),
-      ).sort((a, b) => a.localeCompare(b));
-      return merged;
-    });
-  }, [pageData.content]);
+  React.useEffect(() => {
+    if (!isLoaded || !isSignedIn || allCategoriesLoadedRef.current) return;
+    allCategoriesLoadedRef.current = true;
+
+    getPage({ page: 0, size: 9999 })
+      .then((data) => {
+        const dbCategories = (Array.isArray(data?.content) ? data.content : [])
+          .map((a) => a.category?.trim())
+          .filter((c): c is string => !!c);
+        setAllCategoryOptions(
+          Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
+            (a, b) => a.localeCompare(b),
+          ),
+        );
+      })
+      .catch((err) => console.error("Failed to load all categories:", err));
+  }, [isLoaded, isSignedIn, getPage]);
 
   // ── Load lookups ───────────────────────────────────────────────────────────
   const loadLookups = React.useCallback(
@@ -815,28 +822,10 @@ export default function Assets() {
 
       setLookupLoading(true);
       try {
-        // Fetch management lookups + all asset categories from DB in parallel
-        const [data, allAssetsPage] = await Promise.all([
-          managementApi.loadAssetLookups(),
-          getPage({ page: 0, size: 9999 }),
-        ]);
+        const data = await managementApi.loadAssetLookups();
         setLocations(Array.isArray(data?.locations) ? data.locations : []);
         setEmployees(Array.isArray(data?.employees) ? data.employees : []);
         setSuppliers(Array.isArray(data?.suppliers) ? data.suppliers : []);
-
-        // Merge all DB categories into the options list
-        const dbCategories = (
-          Array.isArray(allAssetsPage?.content) ? allAssetsPage.content : []
-        )
-          .map((a: { category?: string }) => a.category?.trim())
-          .filter((c: string | undefined): c is string => !!c);
-
-        setAllCategoryOptions(
-          Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
-            (a, b) => a.localeCompare(b),
-          ),
-        );
-
         lookupsLoadedRef.current = true;
       } catch (err) {
         console.error("loadLookups failed:", err);
@@ -847,7 +836,7 @@ export default function Assets() {
         setLookupLoading(false);
       }
     },
-    [isLoaded, isSignedIn, managementApi, getPage],
+    [isLoaded, isSignedIn, managementApi],
   );
 
   React.useEffect(() => {
