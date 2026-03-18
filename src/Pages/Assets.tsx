@@ -17,6 +17,17 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
+  X,
+  Package,
+  MapPin,
+  User,
+  Building2,
+  Calendar,
+  ShieldCheck,
+  Tag,
+  Hash,
+  Barcode,
+  Info,
 } from "lucide-react";
 
 import { useAuth } from "@clerk/clerk-react";
@@ -28,6 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -66,6 +78,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 
 import type {
   Asset,
@@ -81,6 +99,16 @@ import QRCodeLib from "qrcode";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 const CUSTOM_CATEGORY_VALUE = "__CUSTOM_CATEGORY__";
+
+// ─── Debounce hook ─────────────────────────────────────────────────────────────
+function useDebounce<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = React.useState(value);
+  React.useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
 
 // ─── Sorting ──────────────────────────────────────────────────────────────────
 type SortKey =
@@ -100,7 +128,6 @@ function sortAssets(
   dir: SortDir,
 ): Asset[] {
   if (!key) return assets;
-
   return [...assets].sort((a, b) => {
     const av = (a[key] ?? "").toString().toLowerCase();
     const bv = (b[key] ?? "").toString().toLowerCase();
@@ -119,7 +146,7 @@ interface SortableHeadProps {
   onSort: (key: SortKey) => void;
 }
 
-function SortableHead({
+const SortableHead = React.memo(function SortableHead({
   label,
   sortKey,
   current,
@@ -127,11 +154,15 @@ function SortableHead({
   onSort,
 }: SortableHeadProps) {
   const active = current === sortKey;
+  const handleClick = React.useCallback(
+    () => onSort(sortKey),
+    [onSort, sortKey],
+  );
 
   return (
     <TableHead
       className="cursor-pointer select-none whitespace-nowrap"
-      onClick={() => onSort(sortKey)}
+      onClick={handleClick}
     >
       <span className="inline-flex items-center gap-1">
         {label}
@@ -147,7 +178,25 @@ function SortableHead({
       </span>
     </TableHead>
   );
-}
+});
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+const StatusBadge = React.memo(function StatusBadge({
+  status,
+}: {
+  status: AssetStatus;
+}) {
+  const variant =
+    status === "Available"
+      ? "secondary"
+      : status === "Assigned"
+        ? "default"
+        : status === "In Repair"
+          ? "destructive"
+          : "outline";
+
+  return <Badge variant={variant}>{status}</Badge>;
+});
 
 // ─── QR Dialog ────────────────────────────────────────────────────────────────
 interface QRDialogProps {
@@ -156,24 +205,31 @@ interface QRDialogProps {
   onClose: () => void;
 }
 
-function QRDialog({ asset, open, onClose }: QRDialogProps) {
+const QRDialog = React.memo(function QRDialog({
+  asset,
+  open,
+  onClose,
+}: QRDialogProps) {
   const canvasElRef = React.useRef<HTMLCanvasElement | null>(null);
 
-  const qrPayload = asset
-    ? JSON.stringify({
-        assetCode: asset.assetCode,
-        serialNo: asset.serialNo,
-        ...(asset.barcode ? { barcode: asset.barcode } : {}),
-        brand: asset.brand,
-        model: asset.model,
-      })
-    : "";
+  const qrPayload = React.useMemo(
+    () =>
+      asset
+        ? JSON.stringify({
+            assetCode: asset.assetCode,
+            serialNo: asset.serialNo,
+            ...(asset.barcode ? { barcode: asset.barcode } : {}),
+            brand: asset.brand,
+            model: asset.model,
+          })
+        : "",
+    [asset],
+  );
 
   const canvasCallbackRef = React.useCallback(
     (node: HTMLCanvasElement | null) => {
       canvasElRef.current = node;
       if (!node || !asset) return;
-
       QRCodeLib.toCanvas(node, qrPayload, {
         width: 220,
         margin: 2,
@@ -183,14 +239,14 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
     [asset, qrPayload],
   );
 
-  const handleDownload = () => {
+  const handleDownload = React.useCallback(() => {
     if (!canvasElRef.current || !asset) return;
     const url = canvasElRef.current.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
     a.download = `QR_${asset.assetCode}.png`;
     a.click();
-  };
+  }, [asset]);
 
   if (!asset) return null;
 
@@ -240,21 +296,266 @@ function QRDialog({ asset, open, onClose }: QRDialogProps) {
       </DialogContent>
     </Dialog>
   );
+});
+
+// ─── Asset Detail Sheet ───────────────────────────────────────────────────────
+interface AssetDetailSheetProps {
+  asset: Asset | null;
+  open: boolean;
+  onClose: () => void;
+  onEdit: (asset: Asset) => void;
+  onDelete: (id: string) => void;
+  onViewQR: (asset: Asset) => void;
 }
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: AssetStatus }) {
-  const variant =
-    status === "Available"
-      ? "secondary"
-      : status === "Assigned"
-        ? "default"
-        : status === "In Repair"
-          ? "destructive"
-          : "outline";
-
-  return <Badge variant={variant}>{status}</Badge>;
+function DetailRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value?: string | null;
+}) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="break-all text-sm font-medium">{value}</p>
+      </div>
+    </div>
+  );
 }
+
+const AssetDetailSheet = React.memo(function AssetDetailSheet({
+  asset,
+  open,
+  onClose,
+  onEdit,
+  onDelete,
+  onViewQR,
+}: AssetDetailSheetProps) {
+  const handleEdit = React.useCallback(() => {
+    if (asset) {
+      onEdit(asset);
+      onClose();
+    }
+  }, [asset, onEdit, onClose]);
+
+  const handleDelete = React.useCallback(() => {
+    if (asset) {
+      onDelete(asset.id);
+      onClose();
+    }
+  }, [asset, onDelete, onClose]);
+
+  const handleQR = React.useCallback(() => {
+    if (asset) {
+      onViewQR(asset);
+      onClose();
+    }
+  }, [asset, onViewQR, onClose]);
+
+  if (!asset) return null;
+
+  const warrantyStatus = (() => {
+    if (!asset.warrantyEnd) return null;
+    const end = new Date(asset.warrantyEnd);
+    const now = new Date();
+    const diffDays = Math.ceil((end.getTime() - now.getTime()) / 86_400_000);
+    if (diffDays < 0) return { label: "Expired", color: "text-destructive" };
+    if (diffDays <= 30)
+      return { label: `Expires in ${diffDays}d`, color: "text-amber-500" };
+    return { label: "Active", color: "text-green-600" };
+  })();
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        {/* Header */}
+        <SheetHeader className="border-b px-6 py-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <Package className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <SheetTitle className="truncate text-base">
+                  {asset.assetCode}
+                </SheetTitle>
+              </div>
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">
+                {asset.brand} {asset.model}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <StatusBadge status={asset.status} />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={onClose}
+                type="button"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </SheetHeader>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Identity section */}
+          <div className="px-6 py-5">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Identity
+            </p>
+            <div className="space-y-3">
+              <DetailRow
+                icon={Tag}
+                label="Asset Code"
+                value={asset.assetCode}
+              />
+              <DetailRow
+                icon={Hash}
+                label="Serial Number"
+                value={asset.serialNo}
+              />
+              <DetailRow icon={Barcode} label="Barcode" value={asset.barcode} />
+              <DetailRow icon={Info} label="Category" value={asset.category} />
+              <DetailRow
+                icon={Package}
+                label="Model"
+                value={
+                  `${asset.brand ?? ""} ${asset.model ?? ""}`.trim() ||
+                  undefined
+                }
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Assignment section */}
+          <div className="px-6 py-5">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Assignment
+            </p>
+            <div className="space-y-3">
+              <DetailRow
+                icon={MapPin}
+                label="Location"
+                value={asset.location}
+              />
+              <DetailRow
+                icon={User}
+                label="Assigned To"
+                value={asset.assignedTo}
+              />
+            </div>
+            {!asset.assignedTo && (
+              <p className="mt-2 text-xs text-muted-foreground italic">
+                Not assigned to any employee
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
+          {/* Procurement section */}
+          <div className="px-6 py-5">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Procurement
+            </p>
+            <div className="space-y-3">
+              <DetailRow
+                icon={Building2}
+                label="Supplier"
+                value={asset.supplierName}
+              />
+              <DetailRow
+                icon={Calendar}
+                label="Purchase Date"
+                value={
+                  asset.purchaseDate
+                    ? new Date(asset.purchaseDate).toLocaleDateString(
+                        undefined,
+                        {
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        },
+                      )
+                    : undefined
+                }
+              />
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-muted-foreground">Warranty End</p>
+                  {asset.warrantyEnd ? (
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">
+                        {new Date(asset.warrantyEnd).toLocaleDateString(
+                          undefined,
+                          {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
+                          },
+                        )}
+                      </p>
+                      {warrantyStatus && (
+                        <span
+                          className={`text-xs font-medium ${warrantyStatus.color}`}
+                        >
+                          ({warrantyStatus.label})
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">—</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="border-t px-6 py-4">
+          <div className="flex flex-wrap gap-2">
+            <Button className="flex-1 gap-2" onClick={handleEdit} type="button">
+              <Pencil className="h-3.5 w-3.5" /> Edit Asset
+            </Button>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleQR}
+              type="button"
+            >
+              <QrCode className="h-3.5 w-3.5" /> QR Code
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={handleDelete}
+              type="button"
+              title="Delete asset"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+});
 
 // ─── Pagination Controls ──────────────────────────────────────────────────────
 interface PaginationProps {
@@ -266,7 +567,7 @@ interface PaginationProps {
   onPageSizeChange: (s: number) => void;
 }
 
-function PaginationControls({
+const PaginationControls = React.memo(function PaginationControls({
   total,
   page,
   pageSize,
@@ -278,6 +579,14 @@ function PaginationControls({
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(page * pageSize, total);
 
+  const handlePageSizeChange = React.useCallback(
+    (v: string) => {
+      onPageSizeChange(Number(v));
+      onPageChange(1);
+    },
+    [onPageSizeChange, onPageChange],
+  );
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
       <p className="text-sm text-muted-foreground">
@@ -287,13 +596,7 @@ function PaginationControls({
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Rows per page</span>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => {
-              onPageSizeChange(Number(v));
-              onPageChange(1);
-            }}
-          >
+          <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
             <SelectTrigger className="h-8 w-[70px]">
               <SelectValue />
             </SelectTrigger>
@@ -319,7 +622,6 @@ function PaginationControls({
           >
             <ChevronsLeft className="h-4 w-4" />
           </Button>
-
           <Button
             variant="outline"
             size="icon"
@@ -331,11 +633,9 @@ function PaginationControls({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-
           <span className="min-w-[90px] text-center text-sm text-muted-foreground">
             Page {page} of {safeTotalPages}
           </span>
-
           <Button
             variant="outline"
             size="icon"
@@ -347,7 +647,6 @@ function PaginationControls({
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-
           <Button
             variant="outline"
             size="icon"
@@ -363,7 +662,7 @@ function PaginationControls({
       </div>
     </div>
   );
-}
+});
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Assets() {
@@ -389,7 +688,10 @@ export default function Assets() {
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [scanLoading, setScanLoading] = React.useState(false);
 
-  const [q, setQ] = React.useState("");
+  // Raw search value (immediate) — debounced for filtering
+  const [qRaw, setQRaw] = React.useState("");
+  const q = useDebounce(qRaw, 300);
+
   const [statusFilter, setStatusFilter] = React.useState<AssetStatus | "All">(
     "All",
   );
@@ -399,18 +701,19 @@ export default function Assets() {
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
 
-  // ── Sorting state ──────────────────────────────────────────────────────────
   const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
   const [sortDir, setSortDir] = React.useState<SortDir>("asc");
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
+  const handleSort = React.useCallback((key: SortKey) => {
+    setSortKey((prev) => {
+      if (prev === key) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        return prev;
+      }
       setSortDir("asc");
-    }
-  };
+      return key;
+    });
+  }, []);
 
   const [scanValue, setScanValue] = React.useState("");
   const scanRef = React.useRef<HTMLInputElement | null>(null);
@@ -422,6 +725,10 @@ export default function Assets() {
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [qrAsset, setQrAsset] = React.useState<Asset | null>(null);
+
+  // Detail sheet state
+  const [detailAsset, setDetailAsset] = React.useState<Asset | null>(null);
+  const [detailOpen, setDetailOpen] = React.useState(false);
 
   const [customCategory, setCustomCategory] = React.useState("");
   const [allCategoryOptions, setAllCategoryOptions] =
@@ -578,54 +885,68 @@ export default function Assets() {
     sortDir,
   ]);
 
+  // ── Detail sheet ───────────────────────────────────────────────────────────
+  const openDetail = React.useCallback((asset: Asset) => {
+    setDetailAsset(asset);
+    setDetailOpen(true);
+  }, []);
+
+  const closeDetail = React.useCallback(() => {
+    setDetailOpen(false);
+  }, []);
+
   // ── Form helpers ───────────────────────────────────────────────────────────
-  const openAdd = () => {
+  const openAdd = React.useCallback(() => {
     setEditingId(null);
     setForm(emptyAssetForm);
     setCustomCategory("");
     setSaveError(null);
     setOpenForm(true);
-  };
+  }, []);
 
-  const openEdit = (asset: Asset) => {
-    setEditingId(asset.id);
+  const openEdit = React.useCallback(
+    (asset: Asset) => {
+      setEditingId(asset.id);
 
-    const matchingLocation = locations.find(
-      (loc) => loc.name?.trim() === asset.location?.trim(),
-    );
+      const matchingLocation = locations.find(
+        (loc) => loc.name?.trim() === asset.location?.trim(),
+      );
+      const matchingEmployee = employees.find(
+        (emp) =>
+          `${emp.empId} - ${emp.name}`.trim() === asset.assignedTo?.trim(),
+      );
+      const existingCategory = asset.category ?? "Laptop";
+      const isPredefinedCategory =
+        allCategoryOptions.includes(existingCategory);
+      const matchingSupplier =
+        suppliers.find((s) => s.id === asset.supplierId) ??
+        suppliers.find((s) => s.name?.trim() === asset.supplierName?.trim());
 
-    const matchingEmployee = employees.find(
-      (emp) => `${emp.empId} - ${emp.name}`.trim() === asset.assignedTo?.trim(),
-    );
+      setForm({
+        assetCode: asset.assetCode ?? "",
+        barcode: asset.barcode ?? "",
+        category: isPredefinedCategory
+          ? existingCategory
+          : CUSTOM_CATEGORY_VALUE,
+        brand: asset.brand ?? "",
+        model: asset.model ?? "",
+        serialNo: asset.serialNo ?? "",
+        status: asset.status ?? "Available",
+        locationId: matchingLocation ? String(matchingLocation.id) : "",
+        assignedToId: matchingEmployee ? String(matchingEmployee.id) : "",
+        supplierId: matchingSupplier ? String(matchingSupplier.id) : "",
+        purchaseDate: asset.purchaseDate ?? "",
+        warrantyEnd: asset.warrantyEnd ?? "",
+      });
 
-    const existingCategory = asset.category ?? "Laptop";
-    const isPredefinedCategory = allCategoryOptions.includes(existingCategory);
+      setCustomCategory(isPredefinedCategory ? "" : existingCategory);
+      setSaveError(null);
+      setOpenForm(true);
+    },
+    [locations, employees, suppliers, allCategoryOptions],
+  );
 
-    const matchingSupplier =
-      suppliers.find((s) => s.id === asset.supplierId) ??
-      suppliers.find((s) => s.name?.trim() === asset.supplierName?.trim());
-
-    setForm({
-      assetCode: asset.assetCode ?? "",
-      barcode: asset.barcode ?? "",
-      category: isPredefinedCategory ? existingCategory : CUSTOM_CATEGORY_VALUE,
-      brand: asset.brand ?? "",
-      model: asset.model ?? "",
-      serialNo: asset.serialNo ?? "",
-      status: asset.status ?? "Available",
-      locationId: matchingLocation ? String(matchingLocation.id) : "",
-      assignedToId: matchingEmployee ? String(matchingEmployee.id) : "",
-      supplierId: matchingSupplier ? String(matchingSupplier.id) : "",
-      purchaseDate: asset.purchaseDate ?? "",
-      warrantyEnd: asset.warrantyEnd ?? "",
-    });
-
-    setCustomCategory(isPredefinedCategory ? "" : existingCategory);
-    setSaveError(null);
-    setOpenForm(true);
-  };
-
-  const validateForm = (): string | null => {
+  const validateForm = React.useCallback((): string | null => {
     if (!form.assetCode.trim()) return "Asset code is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
@@ -634,10 +955,10 @@ export default function Assets() {
       return "Custom category is required.";
     }
     return null;
-  };
+  }, [form, customCategory]);
 
   // ── Save ───────────────────────────────────────────────────────────────────
-  const save = async () => {
+  const save = React.useCallback(async () => {
     const err = validateForm();
     if (err) {
       setSaveError(err);
@@ -687,10 +1008,21 @@ export default function Assets() {
     } finally {
       setSaving(false);
     }
-  };
+  }, [
+    validateForm,
+    isLoaded,
+    isSignedIn,
+    form,
+    customCategory,
+    editingId,
+    update,
+    create,
+    allCategoryOptions,
+    loadPage,
+  ]);
 
   // ── Delete ─────────────────────────────────────────────────────────────────
-  const confirmDelete = async () => {
+  const confirmDelete = React.useCallback(async () => {
     if (!deleteId || !isLoaded || !isSignedIn) return;
 
     setDeleteLoading(true);
@@ -734,32 +1066,68 @@ export default function Assets() {
     } finally {
       setDeleteLoading(false);
     }
-  };
+  }, [
+    deleteId,
+    isLoaded,
+    isSignedIn,
+    remove,
+    pageData.content.length,
+    page,
+    loadPage,
+  ]);
 
   // ── Barcode scan ───────────────────────────────────────────────────────────
-  const findByBarcode = async (barcode: string) => {
-    const code = barcode.trim();
-    if (!code || !isLoaded || !isSignedIn) return;
+  const findByBarcode = React.useCallback(
+    async (barcode: string) => {
+      const code = barcode.trim();
+      if (!code || !isLoaded || !isSignedIn) return;
 
-    setScanLoading(true);
-    try {
-      const found = await getByScan(code);
-      await loadLookups();
-      openEdit(found);
-    } catch (e) {
-      console.error("scan failed:", e);
-    } finally {
-      setScanLoading(false);
-    }
-  };
+      setScanLoading(true);
+      try {
+        const found = await getByScan(code);
+        await loadLookups();
+        openEdit(found);
+      } catch (e) {
+        console.error("scan failed:", e);
+      } finally {
+        setScanLoading(false);
+      }
+    },
+    [isLoaded, isSignedIn, getByScan, loadLookups, openEdit],
+  );
 
-  const onScanKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      findByBarcode(scanValue);
-      setScanValue("");
-    }
-  };
+  const onScanKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        findByBarcode(scanValue);
+        setScanValue("");
+      }
+    },
+    [findByBarcode, scanValue],
+  );
+
+  const handleFindClick = React.useCallback(() => {
+    findByBarcode(scanValue);
+    setScanValue("");
+  }, [findByBarcode, scanValue]);
+
+  const handleFocusScan = React.useCallback(() => {
+    scanRef.current?.focus();
+  }, []);
+
+  const handleClearSort = React.useCallback(() => {
+    setSortKey(null);
+    setSortDir("asc");
+  }, []);
+
+  // ── Row click handler ──────────────────────────────────────────────────────
+  const handleRowClick = React.useCallback(
+    (asset: Asset) => {
+      openDetail(asset);
+    },
+    [openDetail],
+  );
 
   return (
     <div className="space-y-6">
@@ -822,20 +1190,13 @@ export default function Assets() {
               type="button"
               variant="secondary"
               disabled={scanLoading || !scanValue.trim()}
-              onClick={() => {
-                findByBarcode(scanValue);
-                setScanValue("");
-              }}
+              onClick={handleFindClick}
             >
               {scanLoading && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               Find
             </Button>
 
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => scanRef.current?.focus()}
-            >
+            <Button type="button" variant="outline" onClick={handleFocusScan}>
               Focus Scan
             </Button>
           </div>
@@ -852,8 +1213,8 @@ export default function Assets() {
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
+              value={qRaw}
+              onChange={(e) => setQRaw(e.target.value)}
               placeholder="asset code, serial, model, supplier..."
             />
           </div>
@@ -935,10 +1296,7 @@ export default function Assets() {
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs text-muted-foreground"
-                onClick={() => {
-                  setSortKey(null);
-                  setSortDir("asc");
-                }}
+                onClick={handleClearSort}
                 type="button"
               >
                 Clear sort
@@ -959,7 +1317,6 @@ export default function Assets() {
                     dir={sortDir}
                     onSort={handleSort}
                   />
-                  {/* Barcode is not sortable — no meaningful order */}
                   <TableHead>Barcode</TableHead>
                   <SortableHead
                     label="Category"
@@ -1028,7 +1385,11 @@ export default function Assets() {
                   </TableRow>
                 ) : (
                   filteredAssets.map((a) => (
-                    <TableRow key={a.id}>
+                    <TableRow
+                      key={a.id}
+                      className="cursor-pointer transition-colors hover:bg-muted/50"
+                      onClick={() => handleRowClick(a)}
+                    >
                       <TableCell className="font-medium">
                         {a.assetCode}
                       </TableCell>
@@ -1053,7 +1414,10 @@ export default function Assets() {
                       <TableCell className="text-muted-foreground">
                         {a.supplierName || "-"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell
+                        className="text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -1066,6 +1430,9 @@ export default function Assets() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openDetail(a)}>
+                              <Info className="mr-2 h-4 w-4" /> View Details
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={async () => {
                                 await loadLookups();
@@ -1109,6 +1476,22 @@ export default function Assets() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Asset Detail Sheet ── */}
+      <AssetDetailSheet
+        asset={detailAsset}
+        open={detailOpen}
+        onClose={closeDetail}
+        onEdit={async (asset) => {
+          await loadLookups();
+          openEdit(asset);
+        }}
+        onDelete={(id) => {
+          setDeleteError(null);
+          setDeleteId(id);
+        }}
+        onViewQR={setQrAsset}
+      />
 
       {/* ── Add / Edit Dialog ── */}
       <Dialog
