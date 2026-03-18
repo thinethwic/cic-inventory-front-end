@@ -84,6 +84,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+// Note: SheetContent renders its own close button by default.
+// We suppress it and render our own in the header for better layout control.
 
 import type {
   Asset,
@@ -375,7 +377,8 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+      {/* [&>button]:hidden suppresses the default SheetContent close button */}
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md [&>button]:hidden">
         {/* Header */}
         <SheetHeader className="border-b px-6 py-4">
           <div className="flex items-start justify-between gap-2">
@@ -1500,260 +1503,282 @@ export default function Assets() {
           if (!saving) setOpenForm(open);
         }}
       >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[100dvh] flex-col gap-0 p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
+          <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle>{editingId ? "Edit Asset" : "Add Asset"}</DialogTitle>
           </DialogHeader>
 
-          {saveError && <p className="text-sm text-destructive">{saveError}</p>}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {saveError && (
+              <p className="mb-3 text-sm text-destructive">{saveError}</p>
+            )}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Asset Code *</div>
-              <Input
-                value={form.assetCode}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, assetCode: e.target.value }))
-                }
-                placeholder="CIC-IT-LAP-0001"
-                disabled={saving}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">
-                Barcode (optional)
-              </div>
-              <Input
-                value={form.barcode ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, barcode: e.target.value }))
-                }
-                placeholder="Scan barcode / enter value"
-                disabled={saving}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Category</div>
-              <Select
-                value={form.category}
-                onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {allCategoryOptions.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value={CUSTOM_CATEGORY_VALUE}>
-                    Other / Add New Category
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {form.category === CUSTOM_CATEGORY_VALUE && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Asset Code *
+                </div>
                 <Input
-                  value={customCategory}
-                  onChange={(e) => setCustomCategory(e.target.value)}
-                  placeholder="Enter new category"
+                  value={form.assetCode}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, assetCode: e.target.value }))
+                  }
+                  placeholder="CIC-IT-LAP-0001"
                   disabled={saving}
                 />
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Status</div>
-              <Select
-                value={form.status}
-                onValueChange={(v) =>
-                  setForm((p) => ({ ...p, status: v as AssetStatus }))
-                }
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Brand</div>
-              <Input
-                value={form.brand}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, brand: e.target.value }))
-                }
-                placeholder="Dell / HP / Lenovo"
-                disabled={saving}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Model</div>
-              <Input
-                value={form.model}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, model: e.target.value }))
-                }
-                placeholder="Latitude 5420"
-                disabled={saving}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Serial No *</div>
-              <Input
-                value={form.serialNo}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, serialNo: e.target.value }))
-                }
-                placeholder="Serial number"
-                disabled={saving}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Location *</div>
-              <Select
-                value={form.locationId || ""}
-                onValueChange={(v) => setForm((p) => ({ ...p, locationId: v }))}
-                disabled={saving || lookupLoading}
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      lookupLoading ? "Loading locations..." : "Select location"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.length === 0 && !lookupLoading ? (
-                    <SelectItem value="__NO_LOCATION__" disabled>
-                      No locations available
-                    </SelectItem>
-                  ) : (
-                    locations.map((loc) => (
-                      <SelectItem key={loc.id} value={String(loc.id)}>
-                        {loc.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">
-                Assigned To (optional)
               </div>
-              <Select
-                value={
-                  form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
-                }
-                onValueChange={(v) =>
-                  setForm((p) => ({
-                    ...p,
-                    assignedToId: v === "__NONE__" ? "" : v,
-                  }))
-                }
-                disabled={saving || lookupLoading}
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      lookupLoading ? "Loading employees..." : "Select employee"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__NONE__">Not Assigned</SelectItem>
-                  {employees.length === 0 && !lookupLoading ? (
-                    <SelectItem value="__NO_EMPLOYEE__" disabled>
-                      No employees available
-                    </SelectItem>
-                  ) : (
-                    employees.map((emp) => (
-                      <SelectItem key={emp.id} value={String(emp.id)}>
-                        {emp.empId} - {emp.name}
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Barcode (optional)
+                </div>
+                <Input
+                  value={form.barcode ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, barcode: e.target.value }))
+                  }
+                  placeholder="Scan barcode / enter value"
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Category</div>
+                <Select
+                  value={form.category}
+                  onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allCategoryOptions.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
                       </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Supplier *</div>
-              <Select
-                value={form.supplierId?.trim() ? form.supplierId : ""}
-                onValueChange={(v) => setForm((p) => ({ ...p, supplierId: v }))}
-                disabled={saving || lookupLoading}
-              >
-                <SelectTrigger>
-                  <SelectValue
-                    placeholder={
-                      lookupLoading ? "Loading suppliers..." : "Select supplier"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {suppliers.length === 0 && !lookupLoading ? (
-                    <SelectItem value="__NO_SUPPLIER__" disabled>
-                      No suppliers registered
+                    ))}
+                    <SelectItem value={CUSTOM_CATEGORY_VALUE}>
+                      Other / Add New Category
                     </SelectItem>
-                  ) : (
-                    suppliers.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {s.name}
-                        {s.phone && (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            {s.phone}
-                          </span>
-                        )}
+                  </SelectContent>
+                </Select>
+                {form.category === CUSTOM_CATEGORY_VALUE && (
+                  <Input
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    placeholder="Enter new category"
+                    disabled={saving}
+                  />
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Status</div>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) =>
+                    setForm((p) => ({ ...p, status: v as AssetStatus }))
+                  }
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
                       </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Purchase Date</div>
-              <Input
-                type="date"
-                value={form.purchaseDate ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, purchaseDate: e.target.value }))
-                }
-                disabled={saving}
-              />
-            </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Brand</div>
+                <Input
+                  value={form.brand}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, brand: e.target.value }))
+                  }
+                  placeholder="Dell / HP / Lenovo"
+                  disabled={saving}
+                />
+              </div>
 
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Warranty End</div>
-              <Input
-                type="date"
-                value={form.warrantyEnd ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, warrantyEnd: e.target.value }))
-                }
-                disabled={saving}
-              />
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Model</div>
+                <Input
+                  value={form.model}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, model: e.target.value }))
+                  }
+                  placeholder="Latitude 5420"
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Serial No *</div>
+                <Input
+                  value={form.serialNo}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, serialNo: e.target.value }))
+                  }
+                  placeholder="Serial number"
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Location *</div>
+                <Select
+                  value={form.locationId || ""}
+                  onValueChange={(v) =>
+                    setForm((p) => ({ ...p, locationId: v }))
+                  }
+                  disabled={saving || lookupLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        lookupLoading
+                          ? "Loading locations..."
+                          : "Select location"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.length === 0 && !lookupLoading ? (
+                      <SelectItem value="__NO_LOCATION__" disabled>
+                        No locations available
+                      </SelectItem>
+                    ) : (
+                      locations.map((loc) => (
+                        <SelectItem key={loc.id} value={String(loc.id)}>
+                          {loc.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Assigned To (optional)
+                </div>
+                <Select
+                  value={
+                    form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
+                  }
+                  onValueChange={(v) =>
+                    setForm((p) => ({
+                      ...p,
+                      assignedToId: v === "__NONE__" ? "" : v,
+                    }))
+                  }
+                  disabled={saving || lookupLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        lookupLoading
+                          ? "Loading employees..."
+                          : "Select employee"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__NONE__">Not Assigned</SelectItem>
+                    {employees.length === 0 && !lookupLoading ? (
+                      <SelectItem value="__NO_EMPLOYEE__" disabled>
+                        No employees available
+                      </SelectItem>
+                    ) : (
+                      employees.map((emp) => (
+                        <SelectItem key={emp.id} value={String(emp.id)}>
+                          {emp.empId} - {emp.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Supplier *</div>
+                <Select
+                  value={form.supplierId?.trim() ? form.supplierId : ""}
+                  onValueChange={(v) =>
+                    setForm((p) => ({ ...p, supplierId: v }))
+                  }
+                  disabled={saving || lookupLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        lookupLoading
+                          ? "Loading suppliers..."
+                          : "Select supplier"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.length === 0 && !lookupLoading ? (
+                      <SelectItem value="__NO_SUPPLIER__" disabled>
+                        No suppliers registered
+                      </SelectItem>
+                    ) : (
+                      suppliers.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.name}
+                          {s.phone && (
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {s.phone}
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Purchase Date
+                </div>
+                <Input
+                  type="date"
+                  value={form.purchaseDate ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, purchaseDate: e.target.value }))
+                  }
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Warranty End
+                </div>
+                <Input
+                  type="date"
+                  value={form.warrantyEnd ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, warrantyEnd: e.target.value }))
+                  }
+                  disabled={saving}
+                />
+              </div>
             </div>
+            {/* end grid */}
           </div>
+          {/* end scrollable body */}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">
             <Button
               variant="outline"
               onClick={() => setOpenForm(false)}
