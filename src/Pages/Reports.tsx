@@ -354,14 +354,23 @@ export default function ReportsPage() {
     filterDateTo,
   ]);
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────────
+  // ── Fetch — use refs to avoid unstable API function references ───────────────
+  const getAllAssetsRef = React.useRef(getAllAssets);
+  const getAllMaintenanceRef = React.useRef(getAllMaintenance);
+  React.useEffect(() => {
+    getAllAssetsRef.current = getAllAssets;
+  }, [getAllAssets]);
+  React.useEffect(() => {
+    getAllMaintenanceRef.current = getAllMaintenance;
+  }, [getAllMaintenance]);
+
   const fetchAll = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [assetList, maintenancePage] = await Promise.all([
-        getAllAssets(),
-        getAllMaintenance(0, 1000),
+        getAllAssetsRef.current(),
+        getAllMaintenanceRef.current(0, 1000),
       ]);
       setAssets(Array.isArray(assetList) ? assetList : []);
       setMaintenance(maintenancePage.content ?? []);
@@ -371,7 +380,7 @@ export default function ReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [getAllAssets, getAllMaintenance]);
+  }, []); // stable — no API deps, uses refs
 
   React.useEffect(() => {
     fetchAll();
