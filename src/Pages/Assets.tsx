@@ -700,6 +700,7 @@ export default function Assets() {
   );
   const [categoryFilter, setCategoryFilter] = React.useState<string>("All");
   const [supplierFilter, setSupplierFilter] = React.useState<string>("All");
+  const [locationFilter, setLocationFilter] = React.useState<string>("All");
 
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
@@ -847,6 +848,13 @@ export default function Assets() {
   }, []);
 
   // ── Filter then sort ───────────────────────────────────────────────────────
+  const locationOptions = React.useMemo(() => {
+    const names = pageData.content
+      .map((a) => a.location?.trim())
+      .filter((l): l is string => !!l);
+    return Array.from(new Set(names)).sort();
+  }, [pageData.content]);
+
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
 
@@ -872,8 +880,15 @@ export default function Assets() {
       const matchesSupplier =
         supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
 
+      const matchesLocation =
+        locationFilter === "All" || asset.location?.trim() === locationFilter;
+
       return (
-        matchesSearch && matchesStatus && matchesCategory && matchesSupplier
+        matchesSearch &&
+        matchesStatus &&
+        matchesCategory &&
+        matchesSupplier &&
+        matchesLocation
       );
     });
 
@@ -884,6 +899,7 @@ export default function Assets() {
     statusFilter,
     categoryFilter,
     supplierFilter,
+    locationFilter,
     sortKey,
     sortDir,
   ]);
@@ -1212,7 +1228,7 @@ export default function Assets() {
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
 
-        <CardContent className="grid gap-3 md:grid-cols-4">
+        <CardContent className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
@@ -1275,6 +1291,29 @@ export default function Assets() {
                   suppliers.map((s) => (
                     <SelectItem key={s.id} value={String(s.id)}>
                       {s.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <div className="text-xs text-muted-foreground">Location</div>
+            <Select value={locationFilter} onValueChange={setLocationFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select location" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All</SelectItem>
+                {locationOptions.length === 0 ? (
+                  <SelectItem value="__NONE__" disabled>
+                    No locations on this page
+                  </SelectItem>
+                ) : (
+                  locationOptions.map((l) => (
+                    <SelectItem key={l} value={l}>
+                      {l}
                     </SelectItem>
                   ))
                 )}
