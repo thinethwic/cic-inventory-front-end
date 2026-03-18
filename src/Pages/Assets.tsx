@@ -33,7 +33,6 @@ import {
 import { useAuth } from "@clerk/clerk-react";
 import { useManagementApi } from "@/lib/management-api";
 import { useAssetApi } from "@/lib/api";
-import type { AssetsPage } from "@/lib/api";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -673,13 +672,8 @@ export default function Assets() {
   const managementApi = useManagementApi();
   const { getPage, getByScan, create, update, remove } = useAssetApi();
 
-  const [pageData, setPageData] = React.useState<AssetsPage>({
-    content: [],
-    totalElements: 0,
-    totalPages: 1,
-    number: 0,
-    size: 25,
-  });
+  // All assets fetched from server (used for client-side filter + pagination)
+  const [allAssets, setAllAssets] = React.useState<Asset[]>([]);
 
   const [locations, setLocations] = React.useState<Location[]>([]);
   const [employees, setEmployees] = React.useState<Employee[]>([]);
@@ -741,16 +735,10 @@ export default function Assets() {
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
 
-  // ── Fetch page ─────────────────────────────────────────────────────────────
+  // ── Fetch ALL assets once — client-side filter + pagination operates on this ──
   const loadPage = React.useCallback(async () => {
     if (!isLoaded || !isSignedIn) {
-      setPageData({
-        content: [],
-        totalElements: 0,
-        totalPages: 1,
-        number: 0,
-        size: pageSize,
-      });
+      setAllAssets([]);
       setPageLoading(false);
       return;
     }
@@ -760,53 +748,31 @@ export default function Assets() {
     setPageLoading(true);
 
     try {
-      const data = await getPage({ page: page - 1, size: pageSize });
-      setPageData({
-        content: Array.isArray(data?.content) ? data.content : [],
-        totalElements: data?.totalElements ?? 0,
-        totalPages: data?.totalPages ?? 1,
-        number: data?.number ?? 0,
-        size: data?.size ?? pageSize,
-      });
+      const data = await getPage({ page: 0, size: 9999 });
+      const assets = Array.isArray(data?.content) ? data.content : [];
+      setAllAssets(assets);
+
+      // Derive all categories from the full dataset
+      const dbCategories = assets
+        .map((a) => a.category?.trim())
+        .filter((c): c is string => !!c);
+      setAllCategoryOptions(
+        Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
+          (a, b) => a.localeCompare(b),
+        ),
+      );
     } catch (err) {
       console.error("loadPage failed:", err);
-      setPageData({
-        content: [],
-        totalElements: 0,
-        totalPages: 1,
-        number: 0,
-        size: pageSize,
-      });
+      setAllAssets([]);
     } finally {
       setPageLoading(false);
       loadingRef.current = false;
     }
-  }, [isLoaded, isSignedIn, getPage, page, pageSize]);
+  }, [isLoaded, isSignedIn, getPage]);
 
   React.useEffect(() => {
     loadPage();
   }, [loadPage]);
-
-  // ── Load all categories from DB once (separate from pagination) ──────────────
-  const allCategoriesLoadedRef = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!isLoaded || !isSignedIn || allCategoriesLoadedRef.current) return;
-    allCategoriesLoadedRef.current = true;
-
-    getPage({ page: 0, size: 9999 })
-      .then((data) => {
-        const dbCategories = (Array.isArray(data?.content) ? data.content : [])
-          .map((a) => a.category?.trim())
-          .filter((c): c is string => !!c);
-        setAllCategoryOptions(
-          Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
-            (a, b) => a.localeCompare(b),
-          ),
-        );
-      })
-      .catch((err) => console.error("Failed to load all categories:", err));
-  }, [isLoaded, isSignedIn, getPage]);
 
   // ── Load lookups ───────────────────────────────────────────────────────────
   const loadLookups = React.useCallback(
@@ -855,11 +821,11 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
-  // ── Filter then sort ───────────────────────────────────────────────────────
+  // ── Filter + sort over all assets, then client-paginate below ───────────────
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
 
-    const filtered = pageData.content.filter((asset) => {
+    const filtered = allAssets.filter((asset) => {
       const matchesSearch =
         !searchText ||
         asset.assetCode?.toLowerCase().includes(searchText) ||
@@ -895,7 +861,7 @@ export default function Assets() {
 
     return sortAssets(filtered, sortKey, sortDir);
   }, [
-    pageData.content,
+    allAssets,
     q,
     statusFilter,
     categoryFilter,
@@ -904,6 +870,22 @@ export default function Assets() {
     sortKey,
     sortDir,
   ]);
+
+  // ── Client-side pagination over filteredAssets ───────────────────────────────
+  const totalFilteredPages = Math.max(
+    Math.ceil(filteredAssets.length / pageSize),
+    1,
+  );
+
+  // Reset to page 1 when filters change
+  React.useEffect(() => {
+    setPage(1);
+  }, [q, statusFilter, categoryFilter, supplierFilter, locationFilter]);
+
+  const pagedAssets = React.useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredAssets.slice(start, start + pageSize);
+  }, [filteredAssets, page, pageSize]);
 
   // ── Detail sheet ───────────────────────────────────────────────────────────
   const openDetail = React.useCallback((asset: Asset) => {
@@ -1053,10 +1035,14 @@ export default function Assets() {
       setDeleteId(null);
       setDeleteError(null);
 
-      if (pageData.content.length === 1 && page > 1) {
-        setPage((p) => p - 1);
-      } else {
-        await loadPage();
+      await loadPage();
+      // If current page is now empty after delete, go back one page
+      if (page > 1) {
+        setPage((p) => {
+          const newTotal = allAssets.length - 1;
+          const maxPage = Math.max(Math.ceil(newTotal / pageSize), 1);
+          return p > maxPage ? maxPage : p;
+        });
       }
     } catch (e: unknown) {
       console.error("delete failed:", e);
@@ -1091,8 +1077,9 @@ export default function Assets() {
     isLoaded,
     isSignedIn,
     remove,
-    pageData.content.length,
+    allAssets.length,
     page,
+    pageSize,
     loadPage,
   ]);
 
@@ -1427,7 +1414,7 @@ export default function Assets() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredAssets.map((a) => (
+                  pagedAssets.map((a) => (
                     <TableRow
                       key={a.id}
                       className="cursor-pointer transition-colors hover:bg-muted/50"
@@ -1509,10 +1496,10 @@ export default function Assets() {
 
           <div className="mx-6 rounded-b-md border-x border-b">
             <PaginationControls
-              total={pageData.totalElements}
+              total={filteredAssets.length}
               page={page}
               pageSize={pageSize}
-              totalPages={pageData.totalPages}
+              totalPages={totalFilteredPages}
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
             />
