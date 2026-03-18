@@ -848,7 +848,9 @@ export default function Assets() {
         supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
 
       const matchesLocation =
-        locationFilter === "All" || asset.location?.trim() === locationFilter;
+        locationFilter === "All" ||
+        asset.location?.trim().toLowerCase() ===
+          locationFilter.trim().toLowerCase();
 
       return (
         matchesSearch &&
@@ -870,6 +872,19 @@ export default function Assets() {
     sortKey,
     sortDir,
   ]);
+
+  // ── Location options derived from actual asset data (exact string match) ────────
+  const locationOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allAssets
+            .map((a) => a.location?.trim())
+            .filter((l): l is string => !!l),
+        ),
+      ).sort(),
+    [allAssets],
+  );
 
   // ── Client-side pagination over filteredAssets ───────────────────────────────
   const totalFilteredPages = Math.max(
@@ -1294,14 +1309,14 @@ export default function Assets() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="All">All</SelectItem>
-                {locations.length === 0 ? (
+                {locationOptions.length === 0 ? (
                   <SelectItem value="__NONE__" disabled>
-                    {lookupLoading ? "Loading…" : "No locations registered"}
+                    {pageLoading ? "Loading…" : "No locations found"}
                   </SelectItem>
                 ) : (
-                  locations.map((loc) => (
-                    <SelectItem key={loc.id} value={loc.name ?? String(loc.id)}>
-                      {loc.name}
+                  locationOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))
                 )}
