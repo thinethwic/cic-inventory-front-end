@@ -23,7 +23,6 @@ import {
 } from "@/Pages/components/EmployeePageTabs";
 import { useManagementApi } from "@/lib/management-api";
 
-// id is Long on backend → number in TypeScript
 type DeleteTarget = {
   type: "employee" | "department" | "location" | "supplier";
   id: number;
@@ -45,14 +44,18 @@ export default function EmployeesPage() {
     null,
   );
 
-  // ── Load all — one token, four parallel requests ──────────────────────────
+  // ── Stable ref — avoids re-render loops from unstable api reference ────────
+  const apiRef = React.useRef(api);
+  React.useEffect(() => {
+    apiRef.current = api;
+  }, [api]);
 
   const loadAllData = React.useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.loadAll();
+      const data = await apiRef.current.loadAll();
       setDepartments(data.departments);
       setLocations(data.locations);
       setSuppliers(data.suppliers);
@@ -62,30 +65,28 @@ export default function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, isSignedIn]);
 
   React.useEffect(() => {
     loadAllData();
   }, [loadAllData]);
 
-  // ── Delete ────────────────────────────────────────────────────────────────
-
+  // ── Delete ─────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const { type, id } = deleteTarget;
     try {
       if (type === "employee") {
-        await api.deleteEmployee(id);
+        await apiRef.current.deleteEmployee(id);
         setEmployees((p) => p.filter((x) => x.id !== id));
       } else if (type === "department") {
-        await api.deleteDepartment(id);
+        await apiRef.current.deleteDepartment(id);
         setDepartments((p) => p.filter((x) => x.id !== id));
       } else if (type === "location") {
-        await api.deleteLocation(id);
+        await apiRef.current.deleteLocation(id);
         setLocations((p) => p.filter((x) => x.id !== id));
       } else if (type === "supplier") {
-        await api.deleteSupplier(id);
+        await apiRef.current.deleteSupplier(id);
         setSuppliers((p) => p.filter((x) => x.id !== id));
       }
       setDeleteTarget(null);

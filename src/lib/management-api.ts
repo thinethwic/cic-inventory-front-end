@@ -64,6 +64,10 @@ function body(payload: unknown): RequestInit {
     return { body: JSON.stringify(payload) };
 }
 
+// All list endpoints get ?page=0&size=9999 to fetch every record,
+// bypassing the Spring default page size of 20.
+const ALL = "?page=0&size=9999";
+
 export function useManagementApi() {
     const { getToken } = useAuth();
 
@@ -92,10 +96,10 @@ export function useManagementApi() {
         if (!token) throw new Error("Not authenticated");
 
         const [employees, departments, locations, suppliers] = await Promise.all([
-            apiFetch<Employee[] | SpringPage<Employee>>(token, "/employees").then(unwrap),
-            apiFetch<Department[] | SpringPage<Department>>(token, "/departments").then(unwrap),
-            apiFetch<Location[] | SpringPage<Location>>(token, "/locations").then(unwrap),
-            apiFetch<Supplier[] | SpringPage<Supplier>>(token, "/suppliers").then(unwrap),
+            apiFetch<Employee[] | SpringPage<Employee>>(token, `/employees${ALL}`).then(unwrap),
+            apiFetch<Department[] | SpringPage<Department>>(token, `/departments${ALL}`).then(unwrap),
+            apiFetch<Location[] | SpringPage<Location>>(token, `/locations${ALL}`).then(unwrap),
+            apiFetch<Supplier[] | SpringPage<Supplier>>(token, `/suppliers${ALL}`).then(unwrap),
         ]);
 
         return { employees, departments, locations, suppliers };
@@ -111,9 +115,9 @@ export function useManagementApi() {
         if (!token) throw new Error("Not authenticated");
 
         const [employees, locations, suppliers] = await Promise.all([
-            apiFetch<Employee[] | SpringPage<Employee>>(token, "/employees").then(unwrap),
-            apiFetch<Location[] | SpringPage<Location>>(token, "/locations").then(unwrap),
-            apiFetch<Supplier[] | SpringPage<Supplier>>(token, "/suppliers").then(unwrap),
+            apiFetch<Employee[] | SpringPage<Employee>>(token, `/employees${ALL}`).then(unwrap),
+            apiFetch<Location[] | SpringPage<Location>>(token, `/locations${ALL}`).then(unwrap),
+            apiFetch<Supplier[] | SpringPage<Supplier>>(token, `/suppliers${ALL}`).then(unwrap),
         ]);
 
         return { employees, locations, suppliers };

@@ -1,6 +1,16 @@
 // src/Pages/components/EmployeePageTabs.tsx
 import * as React from "react";
-import { Plus, Pencil, Trash2, MoreHorizontal, Loader2 } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  MoreHorizontal,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,6 +54,10 @@ import {
   type LocationPayload,
   type SupplierPayload,
 } from "@/lib/management-api";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 25;
 
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
@@ -106,6 +120,131 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
   );
 }
 
+// ─── Pagination Controls ──────────────────────────────────────────────────────
+interface PaginationProps {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  onPageChange: (p: number) => void;
+  onPageSizeChange: (s: number) => void;
+}
+
+const PaginationControls = React.memo(function PaginationControls({
+  total,
+  page,
+  pageSize,
+  totalPages,
+  onPageChange,
+  onPageSizeChange,
+}: PaginationProps) {
+  const safeTotalPages = Math.max(totalPages, 1);
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+
+  const handleSizeChange = React.useCallback(
+    (v: string) => {
+      onPageSizeChange(Number(v));
+      onPageChange(1);
+    },
+    [onPageSizeChange, onPageChange],
+  );
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+      <p className="text-sm text-muted-foreground">
+        {total === 0 ? "No results" : `Showing ${from}–${to} of ${total}`}
+      </p>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground">Rows per page</span>
+          <Select value={String(pageSize)} onValueChange={handleSizeChange}>
+            <SelectTrigger className="h-8 w-[70px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(1)}
+            disabled={page === 1}
+            title="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(page - 1)}
+            disabled={page === 1}
+            title="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+            Page {page} of {safeTotalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(page + 1)}
+            disabled={page >= safeTotalPages}
+            title="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8"
+            type="button"
+            onClick={() => onPageChange(safeTotalPages)}
+            disabled={page >= safeTotalPages}
+            title="Last page"
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─── usePagination hook ───────────────────────────────────────────────────────
+function usePagination<T>(items: T[], resetDeps: React.DependencyList) {
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(DEFAULT_PAGE_SIZE);
+
+  // Reset to page 1 whenever filters/search change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  React.useEffect(() => {
+    setPage(1);
+  }, resetDeps);
+
+  const totalPages = Math.max(Math.ceil(items.length / pageSize), 1);
+  const paged = React.useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, page, pageSize]);
+
+  return { page, setPage, pageSize, setPageSize, totalPages, paged };
+}
+
 // ─── EmployeesTab ─────────────────────────────────────────────────────────────
 
 export interface EmployeesTabProps {
@@ -117,9 +256,6 @@ export interface EmployeesTabProps {
   onDelete: (id: number, label: string) => void;
 }
 
-// Local form state
-// empId stays here only for display in edit mode / readonly display.
-// On create, backend generates it.
 type EmployeeFormState = {
   empId: string;
   name: string;
@@ -129,15 +265,6 @@ type EmployeeFormState = {
   email: string;
   employeeStatus: "ACTIVE" | "INACTIVE";
 };
-
-export interface EmployeesTabProps {
-  employees: Employee[];
-  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
-  departments: Department[];
-  locations: Location[];
-  loading: boolean;
-  onDelete: (id: number, label: string) => void;
-}
 
 export function EmployeesTab({
   employees,
@@ -182,25 +309,20 @@ export function EmployeesTab({
         !`${e.empId} ${e.name} ${e.email ?? ""} ${e.phone_no ?? ""}`
           .toLowerCase()
           .includes(t)
-      ) {
+      )
         return false;
-      }
-
-      if (deptFilter !== "All" && String(e.department?.id) !== deptFilter) {
+      if (deptFilter !== "All" && String(e.department?.id) !== deptFilter)
         return false;
-      }
-
-      if (locFilter !== "All" && String(e.location?.id) !== locFilter) {
+      if (locFilter !== "All" && String(e.location?.id) !== locFilter)
         return false;
-      }
-
-      if (statusFilter !== "All" && e.employeeStatus !== statusFilter) {
+      if (statusFilter !== "All" && e.employeeStatus !== statusFilter)
         return false;
-      }
-
       return true;
     });
   }, [employees, q, deptFilter, locFilter, statusFilter]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, paged } =
+    usePagination(filtered, [q, deptFilter, locFilter, statusFilter]);
 
   const openAdd = () => {
     setEditing(null);
@@ -228,32 +350,21 @@ export function EmployeesTab({
     if (!form.locationId) return alert("Location is required.");
 
     setSaving(true);
-
     try {
-      if (editing) {
-        const payload: EmployeePayload = {
-          empId: form.empId,
-          name: form.name,
-          department: { id: Number(form.departmentId) },
-          location: { id: Number(form.locationId) },
-          phone_no: form.phone_no,
-          email: form.email,
-          employeeStatus: form.employeeStatus,
-        };
+      const payload: EmployeePayload = {
+        empId: form.empId,
+        name: form.name,
+        department: { id: Number(form.departmentId) },
+        location: { id: Number(form.locationId) },
+        phone_no: form.phone_no,
+        email: form.email,
+        employeeStatus: form.employeeStatus,
+      };
 
+      if (editing) {
         const updated = await updateEmployee(editing.id, payload);
         setEmployees((p) => p.map((x) => (x.id === editing.id ? updated : x)));
       } else {
-        const payload: EmployeePayload = {
-          empId: form.empId,
-          name: form.name,
-          department: { id: Number(form.departmentId) },
-          location: { id: Number(form.locationId) },
-          phone_no: form.phone_no,
-          email: form.email,
-          employeeStatus: form.employeeStatus,
-        };
-
         const created = await createEmployee(payload);
         setEmployees((p) => [created, ...p]);
       }
@@ -370,8 +481,8 @@ export function EmployeesTab({
           </CardTitle>
         </CardHeader>
 
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-0">
+          <div className="mx-6 rounded-t-md border-x border-t">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -384,14 +495,13 @@ export function EmployeesTab({
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-
               <TableBody>
                 {loading ? (
                   <LoadingRow colSpan={7} />
-                ) : filtered.length === 0 ? (
+                ) : paged.length === 0 ? (
                   <EmptyRow colSpan={7} text="No employees found." />
                 ) : (
-                  filtered.map((e) => (
+                  paged.map((e) => (
                     <TableRow key={e.id}>
                       <TableCell className="font-medium">{e.empId}</TableCell>
                       <TableCell>{e.name}</TableCell>
@@ -432,119 +542,131 @@ export function EmployeesTab({
               </TableBody>
             </Table>
           </div>
+          <div className="mx-6 rounded-b-md border-x border-b">
+            <PaginationControls
+              total={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </div>
         </CardContent>
       </Card>
 
       {/* Form Dialog */}
       <Dialog open={openForm} onOpenChange={(o) => !saving && setOpenForm(o)}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[100dvh] flex-col gap-0 p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
+          <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle>
               {editing ? "Edit Employee" : "Add Employee"}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <FieldLabel>Employee ID</FieldLabel>
-              <Input
-                value={editing ? form.empId : "Auto generated by system"}
-                disabled
-                readOnly
-              />
-            </div>
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <FieldLabel>Employee ID</FieldLabel>
+                <Input
+                  value={editing ? form.empId : "Auto generated by system"}
+                  disabled
+                  readOnly
+                />
+              </div>
 
-            <div className="space-y-1">
-              <FieldLabel>Name *</FieldLabel>
-              <Input
-                value={form.name}
-                onChange={(e) => f("name", e.target.value)}
-                placeholder="Full name"
-                disabled={saving}
-              />
-            </div>
+              <div className="space-y-1">
+                <FieldLabel>Name *</FieldLabel>
+                <Input
+                  value={form.name}
+                  onChange={(e) => f("name", e.target.value)}
+                  placeholder="Full name"
+                  disabled={saving}
+                />
+              </div>
 
-            <div className="space-y-1">
-              <FieldLabel>Department *</FieldLabel>
-              <Select
-                value={form.departmentId}
-                onValueChange={(v) => f("departmentId", v)}
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select department" />
-                </SelectTrigger>
-                <SelectContent>
-                  {departments.map((d) => (
-                    <SelectItem key={d.id} value={String(d.id)}>
-                      {d.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="space-y-1">
+                <FieldLabel>Department *</FieldLabel>
+                <Select
+                  value={form.departmentId}
+                  onValueChange={(v) => f("departmentId", v)}
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {departments.map((d) => (
+                      <SelectItem key={d.id} value={String(d.id)}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-1">
-              <FieldLabel>Location *</FieldLabel>
-              <Select
-                value={form.locationId}
-                onValueChange={(v) => f("locationId", v)}
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select location" />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((l) => (
-                    <SelectItem key={l.id} value={String(l.id)}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="space-y-1">
+                <FieldLabel>Location *</FieldLabel>
+                <Select
+                  value={form.locationId}
+                  onValueChange={(v) => f("locationId", v)}
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.map((l) => (
+                      <SelectItem key={l.id} value={String(l.id)}>
+                        {l.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="space-y-1">
-              <FieldLabel>Phone</FieldLabel>
-              <Input
-                value={form.phone_no}
-                onChange={(e) => f("phone_no", e.target.value)}
-                placeholder="07X-XXX-XXXX"
-                disabled={saving}
-              />
-            </div>
+              <div className="space-y-1">
+                <FieldLabel>Phone</FieldLabel>
+                <Input
+                  value={form.phone_no}
+                  onChange={(e) => f("phone_no", e.target.value)}
+                  placeholder="07X-XXX-XXXX"
+                  disabled={saving}
+                />
+              </div>
 
-            <div className="space-y-1">
-              <FieldLabel>Email</FieldLabel>
-              <Input
-                value={form.email}
-                onChange={(e) => f("email", e.target.value)}
-                placeholder="name@cic.lk"
-                disabled={saving}
-              />
-            </div>
+              <div className="space-y-1">
+                <FieldLabel>Email</FieldLabel>
+                <Input
+                  value={form.email}
+                  onChange={(e) => f("email", e.target.value)}
+                  placeholder="name@cic.lk"
+                  disabled={saving}
+                />
+              </div>
 
-            <div className="space-y-1 md:col-span-2">
-              <FieldLabel>Status</FieldLabel>
-              <Select
-                value={form.employeeStatus}
-                onValueChange={(v) =>
-                  f("employeeStatus", v as "ACTIVE" | "INACTIVE")
-                }
-                disabled={saving}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ACTIVE">Active</SelectItem>
-                  <SelectItem value="INACTIVE">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-1 sm:col-span-2">
+                <FieldLabel>Status</FieldLabel>
+                <Select
+                  value={form.employeeStatus}
+                  onValueChange={(v) =>
+                    f("employeeStatus", v as "ACTIVE" | "INACTIVE")
+                  }
+                  disabled={saving}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="INACTIVE">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4">
             <Button
               variant="outline"
               onClick={() => setOpenForm(false)}
@@ -597,6 +719,9 @@ export function SuppliersTab({
         `${s.name} ${s.phone ?? ""} ${s.email ?? ""}`.toLowerCase().includes(t),
     );
   }, [suppliers, q]);
+
+  const { page, setPage, pageSize, setPageSize, totalPages, paged } =
+    usePagination(filtered, [q]);
 
   const openAdd = () => {
     setEditing(null);
@@ -671,8 +796,8 @@ export function SuppliersTab({
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-0">
+          <div className="mx-6 rounded-t-md border-x border-t">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -685,10 +810,10 @@ export function SuppliersTab({
               <TableBody>
                 {loading ? (
                   <LoadingRow colSpan={4} />
-                ) : filtered.length === 0 ? (
+                ) : paged.length === 0 ? (
                   <EmptyRow colSpan={4} text="No suppliers found." />
                 ) : (
-                  filtered.map((s) => (
+                  paged.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell className="text-muted-foreground">
@@ -708,6 +833,16 @@ export function SuppliersTab({
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="mx-6 rounded-b-md border-x border-b">
+            <PaginationControls
+              total={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </div>
         </CardContent>
       </Card>
@@ -797,6 +932,9 @@ export function DepartmentsTab({
     );
   }, [departments, q]);
 
+  const { page, setPage, pageSize, setPageSize, totalPages, paged } =
+    usePagination(filtered, [q]);
+
   const openAdd = () => {
     setEditing(null);
     setForm(blank);
@@ -873,8 +1011,8 @@ export function DepartmentsTab({
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-0">
+          <div className="mx-6 rounded-t-md border-x border-t">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -886,10 +1024,10 @@ export function DepartmentsTab({
               <TableBody>
                 {loading ? (
                   <LoadingRow colSpan={3} />
-                ) : filtered.length === 0 ? (
+                ) : paged.length === 0 ? (
                   <EmptyRow colSpan={3} text="No departments found." />
                 ) : (
-                  filtered.map((d) => (
+                  paged.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.name}</TableCell>
                       <TableCell className="text-muted-foreground">
@@ -908,6 +1046,16 @@ export function DepartmentsTab({
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="mx-6 rounded-b-md border-x border-b">
+            <PaginationControls
+              total={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </div>
         </CardContent>
       </Card>
@@ -990,6 +1138,9 @@ export function LocationsTab({
     );
   }, [locations, q]);
 
+  const { page, setPage, pageSize, setPageSize, totalPages, paged } =
+    usePagination(filtered, [q]);
+
   const openAdd = () => {
     setEditing(null);
     setForm(blank);
@@ -1064,8 +1215,8 @@ export function LocationsTab({
             </span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+        <CardContent className="p-0">
+          <div className="mx-6 rounded-t-md border-x border-t">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1077,10 +1228,10 @@ export function LocationsTab({
               <TableBody>
                 {loading ? (
                   <LoadingRow colSpan={3} />
-                ) : filtered.length === 0 ? (
+                ) : paged.length === 0 ? (
                   <EmptyRow colSpan={3} text="No locations found." />
                 ) : (
-                  filtered.map((l) => (
+                  paged.map((l) => (
                     <TableRow key={l.id}>
                       <TableCell className="font-medium">{l.name}</TableCell>
                       <TableCell className="text-muted-foreground">
@@ -1099,6 +1250,16 @@ export function LocationsTab({
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="mx-6 rounded-b-md border-x border-b">
+            <PaginationControls
+              total={filtered.length}
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </div>
         </CardContent>
       </Card>
