@@ -670,7 +670,7 @@ const PaginationControls = React.memo(function PaginationControls({
 export default function Assets() {
   const { isLoaded, isSignedIn } = useAuth();
   const managementApi = useManagementApi();
-  const { getPage, getByScan, create, update, remove } = useAssetApi();
+  const { getAll, getByScan, create, update, remove } = useAssetApi();
 
   // All assets fetched from server (used for client-side filter + pagination)
   const [allAssets, setAllAssets] = React.useState<Asset[]>([]);
@@ -748,8 +748,8 @@ export default function Assets() {
     setPageLoading(true);
 
     try {
-      const data = await getPage({ page: 0, size: 9999 });
-      const assets = Array.isArray(data?.content) ? data.content : [];
+      const assetList = await getAll();
+      const assets = Array.isArray(assetList) ? assetList : [];
       setAllAssets(assets);
 
       // Derive all categories from the full dataset
@@ -768,7 +768,7 @@ export default function Assets() {
       setPageLoading(false);
       loadingRef.current = false;
     }
-  }, [isLoaded, isSignedIn, getPage]);
+  }, [isLoaded, isSignedIn, getAll]);
 
   React.useEffect(() => {
     loadPage();
