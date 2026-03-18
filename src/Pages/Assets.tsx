@@ -787,17 +787,18 @@ export default function Assets() {
     loadPage();
   }, [loadPage]);
 
-  // ── Dynamic categories ─────────────────────────────────────────────────────
+  // ── Dynamic categories — merge predefined + current page (full list loaded in loadLookups) ──
   React.useEffect(() => {
     const categoriesFromAssets = pageData.content
       .map((a) => a.category?.trim())
       .filter((c): c is string => !!c);
 
-    const merged = Array.from(
-      new Set([...categoryOptions, ...categoriesFromAssets]),
-    ).sort((a, b) => a.localeCompare(b));
-
-    setAllCategoryOptions(merged);
+    setAllCategoryOptions((prev) => {
+      const merged = Array.from(
+        new Set([...categoryOptions, ...prev, ...categoriesFromAssets]),
+      ).sort((a, b) => a.localeCompare(b));
+      return merged;
+    });
   }, [pageData.content]);
 
   // ── Load lookups ───────────────────────────────────────────────────────────
@@ -814,10 +815,28 @@ export default function Assets() {
 
       setLookupLoading(true);
       try {
-        const data = await managementApi.loadAssetLookups();
+        // Fetch management lookups + all asset categories from DB in parallel
+        const [data, allAssetsPage] = await Promise.all([
+          managementApi.loadAssetLookups(),
+          getPage({ page: 0, size: 9999 }),
+        ]);
         setLocations(Array.isArray(data?.locations) ? data.locations : []);
         setEmployees(Array.isArray(data?.employees) ? data.employees : []);
         setSuppliers(Array.isArray(data?.suppliers) ? data.suppliers : []);
+
+        // Merge all DB categories into the options list
+        const dbCategories = (
+          Array.isArray(allAssetsPage?.content) ? allAssetsPage.content : []
+        )
+          .map((a: { category?: string }) => a.category?.trim())
+          .filter((c: string | undefined): c is string => !!c);
+
+        setAllCategoryOptions(
+          Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
+            (a, b) => a.localeCompare(b),
+          ),
+        );
+
         lookupsLoadedRef.current = true;
       } catch (err) {
         console.error("loadLookups failed:", err);
@@ -828,7 +847,7 @@ export default function Assets() {
         setLookupLoading(false);
       }
     },
-    [isLoaded, isSignedIn, managementApi],
+    [isLoaded, isSignedIn, managementApi, getPage],
   );
 
   React.useEffect(() => {
@@ -848,13 +867,6 @@ export default function Assets() {
   }, []);
 
   // ── Filter then sort ───────────────────────────────────────────────────────
-  const locationOptions = React.useMemo(() => {
-    const names = pageData.content
-      .map((a) => a.location?.trim())
-      .filter((l): l is string => !!l);
-    return Array.from(new Set(names)).sort();
-  }, [pageData.content]);
-
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
 
@@ -1306,14 +1318,14 @@ export default function Assets() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="All">All</SelectItem>
-                {locationOptions.length === 0 ? (
+                {locations.length === 0 ? (
                   <SelectItem value="__NONE__" disabled>
-                    No locations on this page
+                    {lookupLoading ? "Loading…" : "No locations registered"}
                   </SelectItem>
                 ) : (
-                  locationOptions.map((l) => (
-                    <SelectItem key={l} value={l}>
-                      {l}
+                  locations.map((loc) => (
+                    <SelectItem key={loc.id} value={loc.name ?? String(loc.id)}>
+                      {loc.name}
                     </SelectItem>
                   ))
                 )}
