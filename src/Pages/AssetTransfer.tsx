@@ -1183,9 +1183,7 @@ export default function AssetTransferPage() {
                           <TableCell>
                             {item.asset.brand} {item.asset.model}
                           </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {item.asset.serialNo || "-"}
-                          </TableCell>
+                          <TableCell>{item.asset.serialNo || "-"}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="capitalize">
                               {item.TransferType}
