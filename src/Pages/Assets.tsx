@@ -194,9 +194,20 @@ const StatusBadge = React.memo(function StatusBadge({
         ? "default"
         : status === "In Repair"
           ? "destructive"
-          : "outline";
+          : status === "Disposed"
+            ? "outline"
+            : "outline";
 
-  return <Badge variant={variant}>{status}</Badge>;
+  const className =
+    status === "Damaged"
+      ? "bg-orange-500 text-white hover:bg-orange-600 border-transparent"
+      : undefined;
+
+  return (
+    <Badge variant={variant} className={className}>
+      {status}
+    </Badge>
+  );
 });
 
 // ─── QR Dialog ────────────────────────────────────────────────────────────────

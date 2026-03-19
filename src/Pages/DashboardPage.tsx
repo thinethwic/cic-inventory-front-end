@@ -77,9 +77,9 @@ function formatTime(date: Date): string {
 
 function transferToActivity(t: AssetTransferResponse): Activity {
   const typeLabel =
-    t.transferType === "employee"
+    t.TransferType === "employee"
       ? "Employee Transfer"
-      : t.transferType === "location"
+      : t.TransferType === "location"
         ? "Location Transfer"
         : "Employee + Location Transfer";
 

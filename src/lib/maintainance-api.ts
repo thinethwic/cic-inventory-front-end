@@ -1,7 +1,7 @@
 // src/lib/maintainance-api.ts
 import * as React from "react";
 import { useAuth } from "@clerk/clerk-react";
-import type { Asset } from "@/types";
+import type { Asset, Supplier } from "@/types";
 import type {
     Maintenance,
     MaintenanceFormState,
@@ -73,25 +73,49 @@ function reqBody(payload: unknown): RequestInit {
     return { body: JSON.stringify(payload) };
 }
 
+// ─── Explicit status map ──────────────────────────────────────────────────────
+const STATUS_TO_BACKEND: Record<string, string> = {
+    "Open": "OPEN",
+    "In Progress": "IN_PROGRESS",
+    "Completed": "COMPLETED",
+    "Cancelled": "CANCELLED",
+    "Cannot Repair": "CANNOT_REPAIR",
+};
+
 // ─── Frontend → Backend DTO ───────────────────────────────────────────────────
-// Matches MaintenanceDTO: ticketNo, assetId (Long), issueTitle, description,
-// priority (ENUM), status (ENUM), reportedDate, dueDate, assignedTo, cost, notes
-// supplierId removed
+// Matches backend DTO exactly:
+//   ticketNo      @NotBlank  — omitted on create (auto-generated), included on update
+//   assetId       @NotNull
+//   issueTitle    nullable string
+//   description   nullable string
+//   priority      @NotNull enum
+//   status        @NotNull enum
+//   reportedDate  @NotNull LocalDate
+//   dueDate       nullable LocalDate
+//   assignedTo    nullable string
+//   cost          nullable BigDecimal
+//   notes         nullable string
 function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
-    return {
-        ticketNo: dto.ticketNo,
+    const payload: Record<string, unknown> = {
         assetId: Number(dto.assetId),
-        // supplierId removed
-        issueTitle: dto.issueTitle,
-        description: dto.description || null,
-        priority: dto.priority?.toUpperCase(),                          // e.g. HIGH
-        status: dto.status?.toUpperCase().replace(/\s+/g, "_"),         // e.g. IN_PROGRESS
+        issueTitle: dto.issueTitle?.trim() || null,
+        description: dto.description?.trim() || null,
+        priority: dto.priority?.toUpperCase(),
+        status: STATUS_TO_BACKEND[dto.status] ?? dto.status?.toUpperCase().replace(/\s+/g, "_"),
         reportedDate: dto.reportedDate,
         dueDate: dto.dueDate || null,
-        assignedTo: dto.assignedTo || null,
+        assignedTo: dto.assignedTo?.trim() || null,
         cost: dto.cost ?? null,
-        notes: dto.notes || null,
+        notes: dto.notes?.trim() || null,
     };
+
+    // ticketNo is @NotBlank — only include on update (when it already exists)
+    // On create the backend auto-generates it so we omit it entirely
+    if (dto.ticketNo?.trim()) {
+        payload.ticketNo = dto.ticketNo.trim();
+    }
+
+    return payload;
 }
 
 // ─── Backend → Frontend ───────────────────────────────────────────────────────
@@ -100,6 +124,7 @@ const STATUS_MAP: Record<string, MaintenanceStatus> = {
     IN_PROGRESS: "In Progress",
     COMPLETED: "Completed",
     CANCELLED: "Cancelled",
+    CANNOT_REPAIR: "Cannot Repair",
 };
 
 const PRIORITY_MAP: Record<string, MaintenancePriority> = {
@@ -110,16 +135,16 @@ const PRIORITY_MAP: Record<string, MaintenancePriority> = {
 };
 
 function fromBackendRow(raw: Record<string, unknown>): Maintenance {
-    // Backend returns full asset object due to @OneToOne
     const asset = raw.asset as Record<string, unknown> | undefined;
-    // supplier field removed
+    const supplier = raw.supplier as Record<string, unknown> | undefined;
 
     return {
         id: String(raw.id),
-        ticketNo: raw.ticketNo as string,
+        ticketNo: (raw.ticketNo as string) ?? "",
         assetId: asset?.id != null ? String(asset.id) : String(raw.assetId ?? ""),
         assetCode: (asset?.assetCode as string) ?? "",
-        // supplierId and supplierName removed
+        supplierId: supplier?.id != null ? String(supplier.id) : undefined,
+        supplierName: (supplier?.name as string) ?? undefined,
         issueTitle: (raw.issueTitle as string) ?? "",
         description: (raw.description as string) ?? "",
         priority: (PRIORITY_MAP[raw.priority as string] ?? raw.priority) as MaintenancePriority,
@@ -138,6 +163,15 @@ function fromBackendPage(
     return { ...page, content: page.content.map(fromBackendRow) };
 }
 
+// ─── Supplier mapper ──────────────────────────────────────────────────────────
+function fromBackendSupplier(raw: Record<string, unknown>): Supplier {
+    return {
+        id: Number(raw.id),
+        name: (raw.name ?? raw.supplierName ?? raw.companyName ?? "") as string,
+        contactPerson: (raw.contactPerson ?? raw.contact ?? undefined) as string | undefined,
+    };
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useMaintenanceApi() {
     const { getToken } = useAuth();
@@ -151,6 +185,7 @@ export function useMaintenanceApi() {
         [getToken]
     );
 
+    // GET all tickets
     const getAll = React.useCallback(
         (page = 0, size = 100) =>
             withToken((t) =>
@@ -162,6 +197,7 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
+    // POST — ticketNo omitted, backend auto-generates it
     const create = React.useCallback(
         (dto: MaintenanceFormState) =>
             withToken((t) =>
@@ -173,6 +209,7 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
+    // PUT — ticketNo included (satisfies @NotBlank)
     const update = React.useCallback(
         (id: string, dto: MaintenanceFormState) =>
             withToken((t) =>
@@ -184,6 +221,7 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
+    // DELETE
     const remove = React.useCallback(
         (id: string) =>
             withToken((t) =>
@@ -192,22 +230,19 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
+    // PUT with status = Completed — ticketNo carried from existing record
     const markCompleted = React.useCallback(
         (id: string, existing: Maintenance) =>
             withToken((t) =>
                 apiFetch<Record<string, unknown>>(t, `/maintenances/${id}`, {
                     method: "PUT",
-                    ...reqBody(
-                        toBackendDto({
-                            ...existing,
-                            status: "Completed",
-                        })
-                    ),
+                    ...reqBody(toBackendDto({ ...existing, status: "Completed" })),
                 }).then(fromBackendRow)
             ),
         [withToken]
     );
 
+    // GET assets for combobox
     const getAssets = React.useCallback(
         (page = 0, size = 200) =>
             withToken((t) =>
@@ -216,7 +251,20 @@ export function useMaintenanceApi() {
         [withToken]
     );
 
-    // getSuppliers removed
+    // GET suppliers for combobox
+    const getSuppliers = React.useCallback(
+        (page = 0, size = 200) =>
+            withToken((t) =>
+                apiFetch<SpringPage<Record<string, unknown>>>(
+                    t,
+                    `/suppliers?page=${page}&size=${size}&sort=name,asc`
+                ).then((p) => ({
+                    ...p,
+                    content: p.content.map(fromBackendSupplier),
+                }))
+            ),
+        [withToken]
+    );
 
-    return { getAll, create, update, remove, markCompleted, getAssets };
+    return { getAll, create, update, remove, markCompleted, getAssets, getSuppliers };
 }

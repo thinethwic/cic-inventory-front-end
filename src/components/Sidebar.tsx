@@ -98,7 +98,7 @@ export default function AppSidebar() {
               {user?.fullName ?? "User"}
             </div>
             <div className="text-xs text-muted-foreground truncate">
-              Version 1.0.0
+              Version 1.1.1
             </div>
           </div>
         </div>

@@ -924,10 +924,10 @@ export default function ReportsPage() {
                       <TableHead>Asset Code</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Model</TableHead>
+                      <TableHead>Serial No</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Assigned To</TableHead>
-                      <TableHead>Supplier</TableHead>
                       <TableHead>Purchase Date</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -953,6 +953,9 @@ export default function ReportsPage() {
                           <TableCell className="text-muted-foreground">
                             {a.brand} {a.model}
                           </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.serialNo}
+                          </TableCell>
                           <TableCell>
                             <StatusBadge status={a.status} />
                           </TableCell>
@@ -961,9 +964,6 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.assignedTo || "-"}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {a.supplierName ?? "-"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.purchaseDate ?? "-"}

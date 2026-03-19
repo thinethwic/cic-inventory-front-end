@@ -7,6 +7,15 @@ import {
   MoreHorizontal,
   CheckCircle2,
   Loader2,
+  Search,
+  ChevronsUpDown,
+  Check,
+  Building2,
+  User,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,8 +59,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
-import type { Asset } from "@/types";
+import type { Asset, AssetStatus, Supplier } from "@/types";
 import type {
   Maintenance,
   MaintenanceFormState,
@@ -66,8 +81,33 @@ import {
 import { useMaintenanceApi } from "@/lib/maintainance-api";
 import { useAssetApi } from "@/lib/api";
 
-// ─── Badge helpers ────────────────────────────────────────────────────────────
+// ─── Maintenance status → Asset status mapping ────────────────────────────────
+function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
+  switch (maintenanceStatus) {
+    case "Open":
+      return "Damaged";
+    case "In Progress":
+      return "In Repair";
+    case "Completed":
+      return "Available";
+    case "Cancelled":
+      return "Available";
+    case "Cannot Repair":
+      return "Disposed";
+    default:
+      return "In Repair";
+  }
+}
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: MaintenanceStatus }) {
+  if (status === "Cannot Repair") {
+    return (
+      <Badge className="bg-orange-500 text-white hover:bg-orange-600 border-transparent">
+        Cannot Repair
+      </Badge>
+    );
+  }
   const variant =
     status === "Completed"
       ? "secondary"
@@ -79,6 +119,7 @@ function StatusBadge({ status }: { status: MaintenanceStatus }) {
   return <Badge variant={variant}>{status}</Badge>;
 }
 
+// ─── Priority Badge ───────────────────────────────────────────────────────────
 function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
   const variant =
     priority === "Critical"
@@ -91,14 +132,346 @@ function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
   return <Badge variant={variant}>{priority}</Badge>;
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
-export default function MaintenancePage() {
-  const { getAll, getAssets, create, update, remove, markCompleted } =
-    useMaintenanceApi();
+// ─── Asset Combobox ───────────────────────────────────────────────────────────
+interface AssetComboboxProps {
+  assets: Asset[];
+  value: string;
+  onChange: (assetId: string) => void;
+  disabled?: boolean;
+}
 
+function AssetCombobox({
+  assets,
+  value,
+  onChange,
+  disabled,
+}: AssetComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return assets;
+    return assets.filter((a) =>
+      `${a.assetCode} ${a.brand ?? ""} ${a.model ?? ""} ${a.serialNo ?? ""}`
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [assets, search]);
+
+  const selected = assets.find((a) => String(a.id) === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <span className="font-medium text-foreground">
+                {selected.assetCode}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="truncate text-muted-foreground">
+                {selected.brand} {selected.model}
+              </span>
+              {selected.serialNo && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {selected.serialNo}
+                  </span>
+                </>
+              )}
+            </span>
+          ) : (
+            "Search and select an asset..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by code, brand, model, serial..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No assets found.
+            </div>
+          ) : (
+            filtered.map((a) => {
+              const isSelected = String(a.id) === value;
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(a.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">
+                        {a.assetCode}
+                      </span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="truncate text-muted-foreground">
+                        {a.brand} {a.model}
+                      </span>
+                    </div>
+                    {a.serialNo && (
+                      <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                        <span className="font-medium">S/N:</span>
+                        <span className="font-mono">{a.serialNo}</span>
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Supplier Combobox ────────────────────────────────────────────────────────
+interface SupplierComboboxProps {
+  suppliers: Supplier[];
+  value: string;
+  onChange: (name: string) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+function SupplierCombobox({
+  suppliers,
+  value,
+  onChange,
+  disabled,
+  loading,
+}: SupplierComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter((s) =>
+      `${s.name} ${s.contactPerson ?? ""}`.toLowerCase().includes(q),
+    );
+  }, [suppliers, search]);
+
+  const selected = suppliers.find((s) => s.name === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading suppliers...
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.name}
+              </span>
+              {selected.contactPerson && (
+                <span className="truncate text-xs text-muted-foreground">
+                  · {selected.contactPerson}
+                </span>
+              )}
+            </span>
+          ) : (
+            "Search and select a supplier..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search supplier name..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No suppliers found.
+            </div>
+          ) : (
+            filtered.map((s) => {
+              const isSelected = s.name === value;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(s.name);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-foreground">
+                      {s.name}
+                    </div>
+                    {s.contactPerson && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        Contact: {s.contactPerson}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Technician Toggle ────────────────────────────────────────────────────────
+type TechnicianType = "internal" | "supplier";
+
+interface TechnicianToggleProps {
+  value: TechnicianType;
+  onChange: (v: TechnicianType) => void;
+  disabled?: boolean;
+}
+
+function TechnicianToggle({
+  value,
+  onChange,
+  disabled,
+}: TechnicianToggleProps) {
+  return (
+    <div className="flex rounded-md border overflow-hidden w-fit">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange("internal")}
+        className={cn(
+          "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
+          value === "internal"
+            ? "bg-primary text-primary-foreground"
+            : "bg-background text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <User className="h-3.5 w-3.5" /> Internal
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange("supplier")}
+        className={cn(
+          "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors border-l",
+          value === "supplier"
+            ? "bg-primary text-primary-foreground"
+            : "bg-background text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <Building2 className="h-3.5 w-3.5" /> Supplier
+      </button>
+    </div>
+  );
+}
+
+// ─── Page size options ────────────────────────────────────────────────────────
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+export default function MaintenancePage() {
+  const {
+    getAll,
+    getAssets,
+    getSuppliers,
+    create,
+    update,
+    remove,
+    markCompleted,
+  } = useMaintenanceApi();
   const { updateStatus: updateAssetStatus } = useAssetApi();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
+  const [suppliersLoading, setSuppliersLoading] = React.useState(false);
   const [rows, setRows] = React.useState<Maintenance[]>([]);
   const [loading, setLoading] = React.useState(false);
 
@@ -111,28 +484,32 @@ export default function MaintenancePage() {
     MaintenancePriority | "All"
   >("All");
 
-  // Form dialog
+  // Pagination
+  const [page, setPage] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState(25);
+
+  // Form
   const [openForm, setOpenForm] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] =
     React.useState<MaintenanceFormState>(emptyMaintenanceForm);
   const [saving, setSaving] = React.useState(false);
   const [formError, setFormError] = React.useState<string | null>(null);
+  const [technicianType, setTechnicianType] =
+    React.useState<TechnicianType>("internal");
 
-  // Delete confirm
+  // Dialogs
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
-
-  // Duplicate asset warning
   const [duplicateAssetId, setDuplicateAssetId] = React.useState<string | null>(
     null,
   );
 
-  // ── Fetch on mount ──────────────────────────────────────────────────────────
+  // ── Data fetching ───────────────────────────────────────────────────────────
   const fetchMaintenance = React.useCallback(async () => {
     setLoading(true);
     try {
-      const page = await getAll();
-      setRows(Array.isArray(page?.content) ? page.content : []);
+      const p = await getAll();
+      setRows(Array.isArray(p?.content) ? p.content : []);
     } catch (e) {
       console.error("Failed to load maintenance:", e);
     } finally {
@@ -153,39 +530,67 @@ export default function MaintenancePage() {
       });
   }, [getAssets]);
 
+  React.useEffect(() => {
+    if (!openForm || suppliers.length > 0) return;
+    setSuppliersLoading(true);
+    getSuppliers()
+      .then((p) => setSuppliers(Array.isArray(p?.content) ? p.content : []))
+      .catch((e) => {
+        console.error("Failed to load suppliers:", e);
+        setSuppliers([]);
+      })
+      .finally(() => setSuppliersLoading(false));
+  }, [openForm, getSuppliers, suppliers.length]);
+
   // ── Client-side filter ──────────────────────────────────────────────────────
   const filtered = React.useMemo(() => {
     const text = q.trim().toLowerCase();
-
     return rows.filter((m) => {
       const matchText =
         !text ||
         `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""}`
           .toLowerCase()
           .includes(text);
-
       const matchStatus = statusFilter === "All" || m.status === statusFilter;
       const matchPriority =
         priorityFilter === "All" || m.priority === priorityFilter;
-
       return matchText && matchStatus && matchPriority;
     });
   }, [rows, q, statusFilter, priorityFilter]);
 
-  // ── Check if asset already has an active ticket ─────────────────────────────
+  // ── Reset to page 0 whenever filter changes ─────────────────────────────────
+  React.useEffect(() => {
+    setPage(0);
+  }, [q, statusFilter, priorityFilter]);
+
+  // ── Pagination derived values ───────────────────────────────────────────────
+  const totalElements = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalElements / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageRows = filtered.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
+
+  const rangeStart = totalElements === 0 ? 0 : safePage * pageSize + 1;
+  const rangeEnd = Math.min((safePage + 1) * pageSize, totalElements);
+
+  // ── Active ticket check ─────────────────────────────────────────────────────
   const hasActiveTicket = (assetId: string, excludeId?: string | null) =>
     rows.some(
       (m) =>
         m.assetId === assetId &&
         m.id !== excludeId &&
         m.status !== "Completed" &&
-        m.status !== "Cancelled",
+        m.status !== "Cancelled" &&
+        m.status !== "Cannot Repair",
     );
 
   // ── Dialog helpers ──────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setFormError(null);
+    setTechnicianType("internal");
     setForm({
       ...emptyMaintenanceForm,
       ticketNo: "",
@@ -197,6 +602,7 @@ export default function MaintenancePage() {
   const openEdit = (m: Maintenance) => {
     setEditingId(m.id);
     setFormError(null);
+    setTechnicianType(m.supplierId ? "supplier" : "internal");
     setForm({
       ticketNo: m.ticketNo,
       assetId: m.assetId,
@@ -219,6 +625,11 @@ export default function MaintenancePage() {
     setForm((p) => ({ ...p, assetId, assetCode: a?.assetCode ?? "" }));
   };
 
+  const handleTechnicianTypeChange = (t: TechnicianType) => {
+    setTechnicianType(t);
+    setForm((p) => ({ ...p, assignedTo: "" }));
+  };
+
   // ── Validate ────────────────────────────────────────────────────────────────
   const validate = (): string | null => {
     if (!form.assetId) return "Asset is required.";
@@ -227,14 +638,13 @@ export default function MaintenancePage() {
     return null;
   };
 
-  // ── Save (create / update) ──────────────────────────────────────────────────
+  // ── Save ────────────────────────────────────────────────────────────────────
   const save = async () => {
     const err = validate();
     if (err) {
       setFormError(err);
       return;
     }
-
     setFormError(null);
 
     if (!editingId && hasActiveTicket(form.assetId)) {
@@ -242,31 +652,31 @@ export default function MaintenancePage() {
       return;
     }
 
-    const isClosed = form.status === "Completed" || form.status === "Cancelled";
-
     setSaving(true);
     try {
+      let savedAssetId = form.assetId;
+
       if (editingId) {
         const updated = await update(editingId, form);
         setRows((p) => p.map((x) => (x.id === editingId ? updated : x)));
+        savedAssetId = updated.assetId;
       } else {
-        const created = await create(form as MaintenanceFormState);
+        const created = await create(form);
         setRows((p) => [created, ...p]);
+        savedAssetId = created.assetId;
       }
 
-      await updateAssetStatus(
-        form.assetId,
-        isClosed ? "Available" : "In Repair",
-      );
+      if (savedAssetId) {
+        await updateAssetStatus(savedAssetId, getAssetStatus(form.status));
+      }
 
       setOpenForm(false);
       setEditingId(null);
-      setForm({
-        ...emptyMaintenanceForm,
-        ticketNo: "",
-      });
+      setTechnicianType("internal");
+      setForm({ ...emptyMaintenanceForm, ticketNo: "" });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to save ticket.";
+      console.error("Save failed:", msg);
       setFormError(msg);
     } finally {
       setSaving(false);
@@ -276,25 +686,34 @@ export default function MaintenancePage() {
   // ── Delete ──────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteId) return;
-
     try {
       const existing = rows.find((x) => x.id === deleteId);
-
       await remove(deleteId);
       setRows((p) => p.filter((x) => x.id !== deleteId));
 
       if (existing?.assetId) {
-        const stillHasOpenTicket = rows.some(
+        const stillActive = rows.some(
           (m) =>
             m.id !== deleteId &&
             m.assetId === existing.assetId &&
             m.status !== "Completed" &&
-            m.status !== "Cancelled",
+            m.status !== "Cancelled" &&
+            m.status !== "Cannot Repair",
         );
-
         await updateAssetStatus(
           existing.assetId,
-          stillHasOpenTicket ? "In Repair" : "Available",
+          stillActive
+            ? getAssetStatus(
+                rows.find(
+                  (m) =>
+                    m.id !== deleteId &&
+                    m.assetId === existing.assetId &&
+                    m.status !== "Completed" &&
+                    m.status !== "Cancelled" &&
+                    m.status !== "Cannot Repair",
+                )?.status ?? "Open",
+              )
+            : "Available",
         );
       }
     } catch (e) {
@@ -308,7 +727,6 @@ export default function MaintenancePage() {
   const handleMarkCompleted = async (id: string) => {
     const existing = rows.find((x) => x.id === id);
     if (!existing) return;
-
     try {
       const updated = await markCompleted(id, existing);
       setRows((p) => p.map((x) => (x.id === id ? updated : x)));
@@ -348,7 +766,6 @@ export default function MaintenancePage() {
               placeholder="ticket, asset code, issue, assigned to..."
             />
           </div>
-
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
             <Select
@@ -370,7 +787,6 @@ export default function MaintenancePage() {
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Priority</div>
             <Select
@@ -400,36 +816,36 @@ export default function MaintenancePage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">
             Tickets{" "}
-            <span className="text-muted-foreground">({filtered.length})</span>
+            <span className="text-muted-foreground">({totalElements})</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="rounded-md border">
+
+        {/* Table — no padding so footer border sits flush */}
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Ticket</TableHead>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="pl-6">Ticket</TableHead>
                   <TableHead>Asset</TableHead>
                   <TableHead>Issue</TableHead>
                   <TableHead>Priority</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Reported</TableHead>
                   <TableHead>Due</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="pr-6 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
-
               <TableBody>
                 {loading ? (
                   <TableRow>
                     <TableCell colSpan={8} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading…
+                        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : filtered.length === 0 ? (
+                ) : pageRows.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -439,9 +855,9 @@ export default function MaintenancePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell className="font-medium">
+                  pageRows.map((m) => (
+                    <TableRow key={m.id} className="hover:bg-muted/30">
+                      <TableCell className="pl-6 font-medium">
                         {m.ticketNo}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
@@ -467,7 +883,7 @@ export default function MaintenancePage() {
                       <TableCell className="text-muted-foreground">
                         {m.dueDate || "-"}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="pr-6 text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" type="button">
@@ -475,14 +891,15 @@ export default function MaintenancePage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {m.status !== "Completed" && (
-                              <DropdownMenuItem
-                                onClick={() => handleMarkCompleted(m.id)}
-                              >
-                                <CheckCircle2 className="mr-2 h-4 w-4" />
-                                Mark Completed
-                              </DropdownMenuItem>
-                            )}
+                            {m.status !== "Completed" &&
+                              m.status !== "Cannot Repair" && (
+                                <DropdownMenuItem
+                                  onClick={() => handleMarkCompleted(m.id)}
+                                >
+                                  <CheckCircle2 className="mr-2 h-4 w-4" /> Mark
+                                  Completed
+                                </DropdownMenuItem>
+                              )}
                             <DropdownMenuItem onClick={() => openEdit(m)}>
                               <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
@@ -500,6 +917,95 @@ export default function MaintenancePage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          {/* ── Pagination footer — matches Assets page PaginationControls style ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              {totalElements === 0
+                ? "No results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${totalElements}`}
+            </p>
+
+            <div className="flex items-center gap-4">
+              {/* Rows per page */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Rows per page
+                </span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(Number(v));
+                    setPage(0);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((s) => (
+                      <SelectItem key={s} value={String(s)}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* First / Prev / Page X of Y / Next / Last */}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage(0)}
+                  disabled={safePage === 0}
+                  title="First page"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={safePage === 0}
+                  title="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+                  Page {safePage + 1} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() =>
+                    setPage((p) => Math.min(totalPages - 1, p + 1))
+                  }
+                  disabled={safePage + 1 >= totalPages}
+                  title="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage(totalPages - 1)}
+                  disabled={safePage + 1 >= totalPages}
+                  title="Last page"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -536,22 +1042,16 @@ export default function MaintenancePage() {
 
             <div className="space-y-1 md:col-span-2">
               <div className="text-xs text-muted-foreground">Asset *</div>
-              <Select
-                value={form.assetId}
-                onValueChange={onAssetChange}
-                disabled={saving || !!editingId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select asset" />
-                </SelectTrigger>
-                <SelectContent>
-                  {assets.map((a) => (
-                    <SelectItem key={a.id} value={String(a.id)}>
-                      {a.assetCode} • {a.brand} {a.model}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {editingId ? (
+                <Input value={form.assetCode} disabled readOnly />
+              ) : (
+                <AssetCombobox
+                  assets={assets}
+                  value={form.assetId}
+                  onChange={onAssetChange}
+                  disabled={saving}
+                />
+              )}
             </div>
 
             <div className="space-y-1 md:col-span-2">
@@ -648,16 +1148,35 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Assigned To</div>
-              <Input
-                value={form.assignedTo ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, assignedTo: e.target.value }))
-                }
-                placeholder="Technician name"
-                disabled={saving}
-              />
+            <div className="space-y-2 md:col-span-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground">Assigned To</div>
+                <TechnicianToggle
+                  value={technicianType}
+                  onChange={handleTechnicianTypeChange}
+                  disabled={saving}
+                />
+              </div>
+              {technicianType === "supplier" ? (
+                <SupplierCombobox
+                  suppliers={suppliers}
+                  value={form.assignedTo ?? ""}
+                  onChange={(name) =>
+                    setForm((p) => ({ ...p, assignedTo: name }))
+                  }
+                  disabled={saving}
+                  loading={suppliersLoading}
+                />
+              ) : (
+                <Input
+                  value={form.assignedTo ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, assignedTo: e.target.value }))
+                  }
+                  placeholder="Technician name"
+                  disabled={saving}
+                />
+              )}
             </div>
 
             <div className="space-y-1">
@@ -679,7 +1198,7 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1 md:col-span-2">
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Notes</div>
               <Input
                 value={form.notes ?? ""}
@@ -709,7 +1228,7 @@ export default function MaintenancePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Duplicate asset active ticket warning */}
+      {/* Duplicate asset warning */}
       <AlertDialog
         open={!!duplicateAssetId}
         onOpenChange={(open) => !open && setDuplicateAssetId(null)}

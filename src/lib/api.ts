@@ -6,6 +6,7 @@ import type { Asset, AssetFormState, AssetStatus } from "@/types";
 // ─── Config ───────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://cic-inventory-back-end.onrender.com";
 const ASSETS_ENDPOINT = `${BASE_URL}/api/v1/assets`;
+const LOCATIONS_ENDPOINT = `${BASE_URL}/api/v1/locations`;
 const JWT_TEMPLATE = "cic-inventory";
 
 // ─── Spring Boot page wrapper ─────────────────────────────────────────────────
@@ -41,7 +42,6 @@ interface RawAsset {
     status: string;
     location?: string | RawLocation | null;
     assignedTo?: string | RawEmployee | null;
-    // Supplier flat fields returned by AssetResponseDTO
     supplierId?: number | null;
     supplierName?: string | null;
     purchaseDate?: string | null;
@@ -73,6 +73,7 @@ const STATUS_TO_FRONTEND: Record<string, AssetStatus> = {
     ASSIGNED: "Assigned",
     MAINTENANCE: "In Repair",
     RETIRED: "Disposed",
+    DAMAGED: "Damaged",
 };
 
 const STATUS_TO_BACKEND: Record<string, string> = {
@@ -81,6 +82,7 @@ const STATUS_TO_BACKEND: Record<string, string> = {
     "In Repair": "MAINTENANCE",
     Disposed: "RETIRED",
     Retired: "RETIRED",
+    Damaged: "DAMAGED",
 };
 
 // ─── Category maps ────────────────────────────────────────────────────────────
@@ -145,7 +147,6 @@ function toAsset(raw: RawAsset): Asset {
         assignedTo: getAssignedToLabel(raw.assignedTo),
         locationId: getLocationId(raw.location),
         assignedToId: getAssignedToId(raw.assignedTo),
-        // Supplier flat fields
         supplierId: raw.supplierId ?? undefined,
         supplierName: raw.supplierName ?? undefined,
         purchaseDate: raw.purchaseDate ?? "",
@@ -164,7 +165,6 @@ function toRequestBody(form: AssetFormState) {
         status: STATUS_TO_BACKEND[form.status] ?? form.status,
         locationId: Number(form.locationId),
         assignedToId: form.assignedToId?.trim() ? Number(form.assignedToId) : null,
-        // supplierId is required — send as number
         supplierId: form.supplierId?.trim() ? Number(form.supplierId) : null,
         purchaseDate: form.purchaseDate || null,
         warrantyEnd: form.warrantyEnd || null,
@@ -226,6 +226,51 @@ async function authFetch(
             Authorization: `Bearer ${token}`,
         },
     });
+}
+
+// ─── Resolve locationId ───────────────────────────────────────────────────────
+// Backend sometimes returns location as { id, name } and sometimes as a plain
+// string. This helper handles both cases — if it's a string it does a lookup.
+async function resolveLocationId(
+    location: string | RawLocation | null | undefined,
+    token: string,
+): Promise<number | null> {
+    if (!location) return null;
+
+    // Best case — backend returned location as an object with id
+    if (typeof location === "object" && location.id != null) {
+        return location.id;
+    }
+
+    // Fallback — location is a plain string name, resolve via locations endpoint
+    if (typeof location === "string" && location.trim()) {
+        const res = await fetch(`${LOCATIONS_ENDPOINT}?size=500`, {
+            headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return null;
+
+        const data = await res.json().catch(() => null);
+        const locations: Array<{ id: number; name: string }> =
+            data?.content ?? data ?? [];
+
+        const match = locations.find(
+            (l) => l.name?.trim().toLowerCase() === location.trim().toLowerCase(),
+        );
+        return match?.id ?? null;
+    }
+
+    return null;
+}
+
+// ─── Resolve assignedToId ─────────────────────────────────────────────────────
+function resolveAssignedToId(
+    assignedTo: string | RawEmployee | null | undefined,
+): number | null {
+    if (!assignedTo) return null;
+    if (typeof assignedTo === "object" && assignedTo.id != null) {
+        return assignedTo.id;
+    }
+    return null;
 }
 
 // ─── Standalone exports (backward compatible) ─────────────────────────────────
@@ -386,33 +431,43 @@ export function useAssetApi() {
     const updateStatus = React.useCallback(
         (id: string, status: AssetStatus) =>
             withToken(async (token) => {
-                // Fetch the current asset first to get all existing field values
+                // Step 1: GET the current asset in raw backend format
                 const getRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
                 });
                 const raw = await handleResponse<RawAsset>(getRes);
-                const current = toAsset(raw);
 
-                const form: AssetFormState = {
-                    assetCode: current.assetCode,
-                    barcode: current.barcode ?? "",
-                    category: current.category,
-                    brand: current.brand,
-                    model: current.model,
-                    serialNo: current.serialNo,
-                    status,
-                    locationId: current.locationId,
-                    assignedToId: current.assignedToId ?? "",
-                    // Carry supplierId forward — required by the backend
-                    supplierId: raw.supplierId != null ? String(raw.supplierId) : "",
-                    purchaseDate: current.purchaseDate ?? "",
-                    warrantyEnd: current.warrantyEnd ?? "",
+                // Step 2: Resolve locationId — handles both object and string shapes
+                // If backend returns location as a plain string, we look it up by name
+                const locationId = await resolveLocationId(raw.location, token);
+
+                // Step 3: Resolve assignedToId — only works if backend returns object
+                const assignedToId = resolveAssignedToId(raw.assignedTo);
+
+                // Step 4: Build PUT body directly from raw fields
+                // IMPORTANT: raw.category and raw.status are already in backend
+                // format (e.g. "LAPTOP", "AVAILABLE") — do NOT pass through
+                // toRequestBody() which would double-transform them
+                const body = {
+                    assetCode: raw.assetCode,
+                    barcode: raw.barcode ?? null,
+                    category: raw.category,                        // already "LAPTOP"
+                    brand: raw.brand,
+                    model: raw.model,
+                    serialNo: raw.serialNo,
+                    status: STATUS_TO_BACKEND[status] ?? status, // only this changes
+                    locationId,
+                    assignedToId,
+                    supplierId: raw.supplierId ?? null,
+                    purchaseDate: raw.purchaseDate ?? null,
+                    warrantyEnd: raw.warrantyEnd ?? null,
                 };
 
+                // Step 5: PUT with clean payload
                 const putRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     method: "PUT",
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
-                    body: JSON.stringify(toRequestBody(form)),
+                    body: JSON.stringify(body),
                 });
                 const updated = await handleResponse<RawAsset>(putRes);
                 return toAsset(updated);
@@ -424,9 +479,10 @@ export function useAssetApi() {
     const getAll = React.useCallback(
         (page = 0, size = 1000) =>
             withToken(async (token) => {
-                const res = await fetch(`${ASSETS_ENDPOINT}?page=${page}&size=${size}`, {
-                    headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
-                });
+                const res = await fetch(
+                    `${ASSETS_ENDPOINT}?page=${page}&size=${size}`,
+                    { headers: { ...defaultHeaders, Authorization: `Bearer ${token}` } },
+                );
                 const data = await handleResponse<SpringPage<RawAsset> | RawAsset[]>(res);
                 return Array.isArray(data)
                     ? data.map(toAsset)
