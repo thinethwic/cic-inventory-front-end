@@ -41,7 +41,9 @@ interface RawAsset {
     serialNo: string;
     status: string;
     location?: string | RawLocation | null;
+    locationId?: number | null;       // flat field from AssetResponseDTO
     assignedTo?: string | RawEmployee | null;
+    assignedToId?: number | null;     // flat field from AssetResponseDTO
     supplierId?: number | null;
     supplierName?: string | null;
     purchaseDate?: string | null;
@@ -113,7 +115,12 @@ function getLocationName(location?: string | RawLocation | null): string {
     return location.name ?? "";
 }
 
-function getLocationId(location?: string | RawLocation | null): string {
+// Prefer flat locationId from AssetResponseDTO, fall back to nested object
+function getLocationId(
+    location?: string | RawLocation | null,
+    flatLocationId?: number | null,
+): string {
+    if (flatLocationId != null) return String(flatLocationId);
     if (!location || typeof location === "string") return "";
     return location.id != null ? String(location.id) : "";
 }
@@ -127,7 +134,12 @@ function getAssignedToLabel(assignedTo?: string | RawEmployee | null): string {
     return name || empId || "";
 }
 
-function getAssignedToId(assignedTo?: string | RawEmployee | null): string {
+// Prefer flat assignedToId from AssetResponseDTO, fall back to nested object
+function getAssignedToId(
+    assignedTo?: string | RawEmployee | null,
+    flatAssignedToId?: number | null,
+): string {
+    if (flatAssignedToId != null) return String(flatAssignedToId);
     if (!assignedTo || typeof assignedTo === "string") return "";
     return assignedTo.id != null ? String(assignedTo.id) : "";
 }
@@ -145,8 +157,9 @@ function toAsset(raw: RawAsset): Asset {
         status: STATUS_TO_FRONTEND[raw.status] ?? (raw.status as AssetStatus),
         location: getLocationName(raw.location),
         assignedTo: getAssignedToLabel(raw.assignedTo),
-        locationId: getLocationId(raw.location),
-        assignedToId: getAssignedToId(raw.assignedTo),
+        // Prefer flat fields from AssetResponseDTO, fall back to nested object
+        locationId: getLocationId(raw.location, raw.locationId),
+        assignedToId: getAssignedToId(raw.assignedTo, raw.assignedToId),
         supplierId: raw.supplierId ?? undefined,
         supplierName: raw.supplierName ?? undefined,
         purchaseDate: raw.purchaseDate ?? "",
@@ -229,45 +242,39 @@ async function authFetch(
 }
 
 // ─── Resolve locationId ───────────────────────────────────────────────────────
-// Backend sometimes returns location as { id, name } and sometimes as a plain
-// string. This helper handles both cases — if it's a string it does a lookup.
+// Prefers flat field, falls back to nested object, then name lookup
 async function resolveLocationId(
     location: string | RawLocation | null | undefined,
+    flatLocationId: number | null | undefined,
     token: string,
 ): Promise<number | null> {
-    if (!location) return null;
-
-    // Best case — backend returned location as an object with id
-    if (typeof location === "object" && location.id != null) {
+    if (flatLocationId != null) return flatLocationId;
+    if (location && typeof location === "object" && location.id != null) {
         return location.id;
     }
-
-    // Fallback — location is a plain string name, resolve via locations endpoint
     if (typeof location === "string" && location.trim()) {
         const res = await fetch(`${LOCATIONS_ENDPOINT}?size=500`, {
             headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
         });
         if (!res.ok) return null;
-
         const data = await res.json().catch(() => null);
         const locations: Array<{ id: number; name: string }> =
             data?.content ?? data ?? [];
-
         const match = locations.find(
             (l) => l.name?.trim().toLowerCase() === location.trim().toLowerCase(),
         );
         return match?.id ?? null;
     }
-
     return null;
 }
 
 // ─── Resolve assignedToId ─────────────────────────────────────────────────────
 function resolveAssignedToId(
     assignedTo: string | RawEmployee | null | undefined,
+    flatAssignedToId: number | null | undefined,
 ): number | null {
-    if (!assignedTo) return null;
-    if (typeof assignedTo === "object" && assignedTo.id != null) {
+    if (flatAssignedToId != null) return flatAssignedToId;
+    if (assignedTo && typeof assignedTo === "object" && assignedTo.id != null) {
         return assignedTo.id;
     }
     return null;
@@ -431,31 +438,35 @@ export function useAssetApi() {
     const updateStatus = React.useCallback(
         (id: string, status: AssetStatus) =>
             withToken(async (token) => {
-                // Step 1: GET the current asset in raw backend format
+                // Step 1: GET current asset in raw backend format
                 const getRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },
                 });
                 const raw = await handleResponse<RawAsset>(getRes);
 
-                // Step 2: Resolve locationId — handles both object and string shapes
-                // If backend returns location as a plain string, we look it up by name
-                const locationId = await resolveLocationId(raw.location, token);
+                // Step 2: Resolve locationId — prefers flat field, falls back to name lookup
+                const locationId = await resolveLocationId(
+                    raw.location,
+                    raw.locationId,
+                    token,
+                );
 
-                // Step 3: Resolve assignedToId — only works if backend returns object
-                const assignedToId = resolveAssignedToId(raw.assignedTo);
+                // Step 3: Resolve assignedToId — prefers flat field
+                const assignedToId = resolveAssignedToId(
+                    raw.assignedTo,
+                    raw.assignedToId,
+                );
 
-                // Step 4: Build PUT body directly from raw fields
-                // IMPORTANT: raw.category and raw.status are already in backend
-                // format (e.g. "LAPTOP", "AVAILABLE") — do NOT pass through
-                // toRequestBody() which would double-transform them
+                // Step 4: Build PUT body directly from raw — do NOT use toRequestBody()
+                // raw.category and raw.status are already in backend format ("LAPTOP", "AVAILABLE")
                 const body = {
                     assetCode: raw.assetCode,
                     barcode: raw.barcode ?? null,
-                    category: raw.category,                        // already "LAPTOP"
+                    category: raw.category,
                     brand: raw.brand,
                     model: raw.model,
                     serialNo: raw.serialNo,
-                    status: STATUS_TO_BACKEND[status] ?? status, // only this changes
+                    status: STATUS_TO_BACKEND[status] ?? status,
                     locationId,
                     assignedToId,
                     supplierId: raw.supplierId ?? null,
@@ -463,7 +474,7 @@ export function useAssetApi() {
                     warrantyEnd: raw.warrantyEnd ?? null,
                 };
 
-                // Step 5: PUT with clean payload
+                // Step 5: PUT
                 const putRes = await fetch(`${ASSETS_ENDPOINT}/${id}`, {
                     method: "PUT",
                     headers: { ...defaultHeaders, Authorization: `Bearer ${token}` },

@@ -28,6 +28,8 @@ import {
   Hash,
   Barcode,
   Info,
+  Search,
+  Check,
 } from "lucide-react";
 
 import { useAuth } from "@clerk/clerk-react";
@@ -83,8 +85,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-// Note: SheetContent renders its own close button by default.
-// We suppress it and render our own in the header for better layout control.
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 import type {
   Asset,
@@ -96,6 +101,7 @@ import type {
 } from "@/types";
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
 import QRCodeLib from "qrcode";
+import { cn } from "@/lib/utils";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -387,7 +393,6 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* [&>button]:hidden suppresses the default SheetContent close button */}
       <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md [&>button]:hidden">
         {/* Header */}
         <SheetHeader className="border-b px-6 py-4">
@@ -677,13 +682,460 @@ const PaginationControls = React.memo(function PaginationControls({
   );
 });
 
+// ─── Location Combobox ────────────────────────────────────────────────────────
+interface LocationComboboxProps {
+  locations: Location[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+function LocationCombobox({
+  locations,
+  value,
+  onChange,
+  disabled,
+  loading,
+}: LocationComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return locations;
+    return locations.filter((l) =>
+      [l.name, l.code].filter(Boolean).join(" ").toLowerCase().includes(q),
+    );
+  }, [locations, search]);
+
+  const selected = locations.find((l) => String(l.id) === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading locations...
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.name}
+              </span>
+              {selected.code && (
+                <span className="truncate text-xs text-muted-foreground">
+                  · {selected.code}
+                </span>
+              )}
+            </span>
+          ) : (
+            "Search and select a location..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or code..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No locations found.
+            </div>
+          ) : (
+            filtered.map((l) => {
+              const isSelected = String(l.id) === value;
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(l.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="font-semibold text-foreground">
+                        {l.name}
+                      </span>
+                    </div>
+                    {l.code && (
+                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {l.code}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Employee Combobox ────────────────────────────────────────────────────────
+interface EmployeeComboboxProps {
+  employees: Employee[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+function EmployeeCombobox({
+  employees,
+  value,
+  onChange,
+  disabled,
+  loading,
+}: EmployeeComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((e) =>
+      [e.empId, e.name, e.email, e.department?.name, e.location?.name]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [employees, search]);
+
+  const selected =
+    value && value !== "__NONE__"
+      ? employees.find((e) => String(e.id) === value)
+      : null;
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading employees...
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.empId}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="truncate text-foreground">{selected.name}</span>
+            </span>
+          ) : (
+            "Not assigned"
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by ID, name, department..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {/* Not Assigned option */}
+          <button
+            type="button"
+            onClick={() => {
+              onChange("__NONE__");
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+              (!value || value === "__NONE__") && "bg-accent",
+            )}
+          >
+            <Check
+              className={cn(
+                "mt-0.5 h-4 w-4 shrink-0",
+                !value || value === "__NONE__"
+                  ? "opacity-100 text-primary"
+                  : "opacity-0",
+              )}
+            />
+            <span className="italic text-muted-foreground">Not assigned</span>
+          </button>
+
+          {filtered.length === 0 ? (
+            <div className="px-4 py-4 text-center text-sm text-muted-foreground">
+              No employees found.
+            </div>
+          ) : (
+            filtered.map((e) => {
+              const isSelected = String(e.id) === value;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(e.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">
+                        {e.empId}
+                      </span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="truncate font-medium text-foreground">
+                        {e.name}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      {e.department?.name && (
+                        <span className="flex items-center gap-1">
+                          <Building2 className="h-3 w-3" />
+                          {e.department.name}
+                        </span>
+                      )}
+                      {e.location?.name && (
+                        <span className="flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {e.location.name}
+                        </span>
+                      )}
+                      {e.email && <span className="truncate">{e.email}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Supplier Combobox ────────────────────────────────────────────────────────
+interface SupplierComboboxProps {
+  suppliers: Supplier[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}
+
+function SupplierCombobox({
+  suppliers,
+  value,
+  onChange,
+  disabled,
+  loading,
+}: SupplierComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter((s) =>
+      [s.name, s.contactPerson, s.phone]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [suppliers, search]);
+
+  const selected = suppliers.find((s) => String(s.id) === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading suppliers...
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.name}
+              </span>
+              {selected.contactPerson && (
+                <span className="truncate text-xs text-muted-foreground">
+                  · {selected.contactPerson}
+                </span>
+              )}
+            </span>
+          ) : (
+            "Search and select a supplier..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search supplier name, contact..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No suppliers found.
+            </div>
+          ) : (
+            filtered.map((s) => {
+              const isSelected = String(s.id) === value;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(s.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-foreground">
+                      {s.name}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                      {s.contactPerson && <span>{s.contactPerson}</span>}
+                      {s.phone && <span className="font-mono">{s.phone}</span>}
+                    </div>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Assets() {
   const { isLoaded, isSignedIn } = useAuth();
   const managementApi = useManagementApi();
   const { getAll, getByScan, create, update, remove } = useAssetApi();
 
-  // All assets fetched from server (used for client-side filter + pagination)
   const [allAssets, setAllAssets] = React.useState<Asset[]>([]);
 
   const [locations, setLocations] = React.useState<Location[]>([]);
@@ -696,7 +1148,6 @@ export default function Assets() {
   const [deleteLoading, setDeleteLoading] = React.useState(false);
   const [scanLoading, setScanLoading] = React.useState(false);
 
-  // Raw search value (immediate) — debounced for filtering
   const [qRaw, setQRaw] = React.useState("");
   const q = useDebounce(qRaw, 300);
 
@@ -735,7 +1186,6 @@ export default function Assets() {
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [qrAsset, setQrAsset] = React.useState<Asset | null>(null);
 
-  // Detail sheet state
   const [detailAsset, setDetailAsset] = React.useState<Asset | null>(null);
   const [detailOpen, setDetailOpen] = React.useState(false);
 
@@ -746,7 +1196,7 @@ export default function Assets() {
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
 
-  // ── Fetch ALL assets once — client-side filter + pagination operates on this ──
+  // ── Fetch ALL assets ────────────────────────────────────────────────────────
   const loadPage = React.useCallback(async () => {
     if (!isLoaded || !isSignedIn) {
       setAllAssets([]);
@@ -763,7 +1213,6 @@ export default function Assets() {
       const assets = Array.isArray(assetList) ? assetList : [];
       setAllAssets(assets);
 
-      // Derive all categories from the full dataset
       const dbCategories = assets
         .map((a) => a.category?.trim())
         .filter((c): c is string => !!c);
@@ -832,7 +1281,7 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
-  // ── Filter + sort over all assets, then client-paginate below ───────────────
+  // ── Filter + sort ──────────────────────────────────────────────────────────
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
 
@@ -851,13 +1300,10 @@ export default function Assets() {
 
       const matchesStatus =
         statusFilter === "All" || asset.status === statusFilter;
-
       const matchesCategory =
         categoryFilter === "All" || asset.category === categoryFilter;
-
       const matchesSupplier =
         supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
-
       const matchesLocation =
         locationFilter === "All" ||
         asset.location?.trim().toLowerCase() ===
@@ -884,7 +1330,6 @@ export default function Assets() {
     sortDir,
   ]);
 
-  // ── Location options derived from actual asset data (exact string match) ────────
   const locationOptions = React.useMemo(
     () =>
       Array.from(
@@ -897,13 +1342,11 @@ export default function Assets() {
     [allAssets],
   );
 
-  // ── Client-side pagination over filteredAssets ───────────────────────────────
   const totalFilteredPages = Math.max(
     Math.ceil(filteredAssets.length / pageSize),
     1,
   );
 
-  // Reset to page 1 when filters change
   React.useEffect(() => {
     setPage(1);
   }, [q, statusFilter, categoryFilter, supplierFilter, locationFilter]);
@@ -1062,7 +1505,6 @@ export default function Assets() {
       setDeleteError(null);
 
       await loadPage();
-      // If current page is now empty after delete, go back one page
       if (page > 1) {
         setPage((p) => {
           const newTotal = allAssets.length - 1;
@@ -1154,7 +1596,6 @@ export default function Assets() {
     setSortDir("asc");
   }, []);
 
-  // ── Row click handler ──────────────────────────────────────────────────────
   const handleRowClick = React.useCallback(
     (asset: Asset) => {
       openDetail(asset);
@@ -1567,6 +2008,7 @@ export default function Assets() {
             )}
 
             <div className="grid gap-3 sm:grid-cols-2">
+              {/* Asset Code */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
                   Asset Code *
@@ -1581,6 +2023,7 @@ export default function Assets() {
                 />
               </div>
 
+              {/* Barcode */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
                   Barcode (optional)
@@ -1595,6 +2038,7 @@ export default function Assets() {
                 />
               </div>
 
+              {/* Category */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Category</div>
                 <Select
@@ -1626,6 +2070,7 @@ export default function Assets() {
                 )}
               </div>
 
+              {/* Status */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Status</div>
                 <Select
@@ -1648,6 +2093,7 @@ export default function Assets() {
                 </Select>
               </div>
 
+              {/* Brand */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Brand</div>
                 <Input
@@ -1660,6 +2106,7 @@ export default function Assets() {
                 />
               </div>
 
+              {/* Model */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Model</div>
                 <Input
@@ -1672,6 +2119,7 @@ export default function Assets() {
                 />
               </div>
 
+              {/* Serial No */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Serial No *</div>
                 <Input
@@ -1684,121 +2132,52 @@ export default function Assets() {
                 />
               </div>
 
-              <div className="space-y-1">
+              {/* Location — searchable combobox */}
+              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <div className="text-xs text-muted-foreground">Location *</div>
-                <Select
+                <LocationCombobox
+                  locations={locations}
                   value={form.locationId || ""}
-                  onValueChange={(v) =>
-                    setForm((p) => ({ ...p, locationId: v }))
-                  }
-                  disabled={saving || lookupLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        lookupLoading
-                          ? "Loading locations..."
-                          : "Select location"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {locations.length === 0 && !lookupLoading ? (
-                      <SelectItem value="__NO_LOCATION__" disabled>
-                        No locations available
-                      </SelectItem>
-                    ) : (
-                      locations.map((loc) => (
-                        <SelectItem key={loc.id} value={String(loc.id)}>
-                          {loc.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                  onChange={(v) => setForm((p) => ({ ...p, locationId: v }))}
+                  disabled={saving}
+                  loading={lookupLoading}
+                />
               </div>
 
-              <div className="space-y-1">
+              {/* Assigned To — searchable combobox */}
+              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <div className="text-xs text-muted-foreground">
                   Assigned To (optional)
                 </div>
-                <Select
+                <EmployeeCombobox
+                  employees={employees}
                   value={
                     form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
                   }
-                  onValueChange={(v) =>
+                  onChange={(v) =>
                     setForm((p) => ({
                       ...p,
                       assignedToId: v === "__NONE__" ? "" : v,
                     }))
                   }
-                  disabled={saving || lookupLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        lookupLoading
-                          ? "Loading employees..."
-                          : "Select employee"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__NONE__">Not Assigned</SelectItem>
-                    {employees.length === 0 && !lookupLoading ? (
-                      <SelectItem value="__NO_EMPLOYEE__" disabled>
-                        No employees available
-                      </SelectItem>
-                    ) : (
-                      employees.map((emp) => (
-                        <SelectItem key={emp.id} value={String(emp.id)}>
-                          {emp.empId} - {emp.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                  disabled={saving}
+                  loading={lookupLoading}
+                />
               </div>
 
-              <div className="space-y-1">
+              {/* Supplier — searchable combobox */}
+              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <div className="text-xs text-muted-foreground">Supplier *</div>
-                <Select
+                <SupplierCombobox
+                  suppliers={suppliers}
                   value={form.supplierId?.trim() ? form.supplierId : ""}
-                  onValueChange={(v) =>
-                    setForm((p) => ({ ...p, supplierId: v }))
-                  }
-                  disabled={saving || lookupLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        lookupLoading
-                          ? "Loading suppliers..."
-                          : "Select supplier"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers.length === 0 && !lookupLoading ? (
-                      <SelectItem value="__NO_SUPPLIER__" disabled>
-                        No suppliers registered
-                      </SelectItem>
-                    ) : (
-                      suppliers.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name}
-                          {s.phone && (
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {s.phone}
-                            </span>
-                          )}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                  onChange={(v) => setForm((p) => ({ ...p, supplierId: v }))}
+                  disabled={saving}
+                  loading={lookupLoading}
+                />
               </div>
 
+              {/* Purchase Date */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
                   Purchase Date
@@ -1813,6 +2192,7 @@ export default function Assets() {
                 />
               </div>
 
+              {/* Warranty End */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
                   Warranty End
@@ -1827,9 +2207,7 @@ export default function Assets() {
                 />
               </div>
             </div>
-            {/* end grid */}
           </div>
-          {/* end scrollable body */}
 
           <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">
             <Button

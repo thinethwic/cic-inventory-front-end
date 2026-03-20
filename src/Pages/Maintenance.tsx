@@ -209,6 +209,7 @@ function AssetCombobox({
         className="w-[--radix-popover-trigger-width] p-0"
         align="start"
         sideOffset={4}
+        onWheel={(e) => e.stopPropagation()}
       >
         <div className="flex items-center border-b px-3 py-2 gap-2">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />

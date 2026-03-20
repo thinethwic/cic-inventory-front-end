@@ -117,6 +117,16 @@ function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
   return raw || fallback;
 }
 
+// ── Extract name string from object or plain string ───────────────────────────
+function extractName(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (typeof raw === "object" && "name" in (raw as object)) {
+    return String((raw as { name: unknown }).name) || null;
+  }
+  if (typeof raw === "string") return raw || null;
+  return null;
+}
+
 // ── Build asset payload ───────────────────────────────────────────────────────
 function buildAssetPayload(args: {
   asset: Asset;
@@ -127,13 +137,11 @@ function buildAssetPayload(args: {
 }): AssetFormState {
   const { asset, transferType, newEmployeeId, newLocationId, locations } = args;
 
-  // Determine next employee ID
   const nextEmployeeId =
     transferType === "employee" || transferType === "both"
       ? newEmployeeId
       : asset.assignedToId || "";
 
-  // Resolve current location ID from asset (fallback: name lookup)
   const resolveCurrentLocationId = (): string => {
     if (asset.locationId) return asset.locationId;
     if (!asset.location) return "";
@@ -144,7 +152,6 @@ function buildAssetPayload(args: {
     return match ? String(match.id) : "";
   };
 
-  // Determine next location ID
   const nextLocationId =
     transferType === "location" || transferType === "both"
       ? newLocationId
@@ -157,7 +164,6 @@ function buildAssetPayload(args: {
     brand: asset.brand,
     model: asset.model,
     serialNo: asset.serialNo,
-    // Mark as Assigned if an employee is being set, otherwise keep current status
     status: nextEmployeeId ? "Assigned" : asset.status,
     locationId: nextLocationId,
     assignedToId: nextEmployeeId,
@@ -165,19 +171,6 @@ function buildAssetPayload(args: {
     warrantyEnd: asset.warrantyEnd ?? "",
     supplierId: asset.supplierId != null ? String(asset.supplierId) : "",
   };
-}
-
-// ── Parse asset ID safely to number ──────────────────────────────────────────
-// Asset.id may be a numeric string ("42") — parse carefully and throw early
-// if it is not a valid integer so the error is clear.
-function parseAssetId(id: string): number {
-  const parsed = parseInt(id, 10);
-  if (isNaN(parsed)) {
-    throw new Error(
-      `Asset ID "${id}" is not a valid number. Cannot create transfer record.`,
-    );
-  }
-  return parsed;
 }
 
 // ── Searchable Asset Combobox ─────────────────────────────────────────────────
@@ -209,8 +202,8 @@ function AssetCombobox({
         a.brand,
         a.model,
         a.category,
-        a.location,
-        a.assignedTo,
+        extractName(a.location as unknown),
+        extractName(a.assignedTo as unknown),
       ]
         .filter(Boolean)
         .join(" ")
@@ -287,6 +280,8 @@ function AssetCombobox({
           ) : (
             filtered.map((a) => {
               const isSelected = a.id === value;
+              const locationName = extractName(a.location as unknown);
+              const assignedToName = extractName(a.assignedTo as unknown);
               return (
                 <button
                   key={a.id}
@@ -326,16 +321,16 @@ function AssetCombobox({
                       {a.serialNo && (
                         <span className="font-mono">{a.serialNo}</span>
                       )}
-                      {a.location && (
+                      {locationName && (
                         <span className="flex items-center gap-1">
                           <MapPin className="h-3 w-3" />
-                          {a.location}
+                          {locationName}
                         </span>
                       )}
-                      {a.assignedTo && (
+                      {assignedToName && (
                         <span className="flex items-center gap-1">
                           <User className="h-3 w-3" />
-                          {a.assignedTo}
+                          {assignedToName}
                         </span>
                       )}
                     </div>
@@ -649,7 +644,6 @@ function LocationCombobox({
 export default function AssetTransferPage() {
   const { getToken } = useAuth();
   const managementApi = useManagementApi();
-
   const { update: updateAssetRecord } = useAssetApi();
 
   const getTokenRef = React.useRef(getToken);
@@ -713,8 +707,7 @@ export default function AssetTransferPage() {
           page,
           pageSize,
         );
-        const content = Array.isArray(result?.content) ? result.content : [];
-        setHistory(content);
+        setHistory(Array.isArray(result?.content) ? result.content : []);
         setHistoryPage(page);
         setHistoryTotalPages(result?.totalPages ?? 1);
         setHistoryTotalElements(result?.totalElements ?? 0);
@@ -755,6 +748,7 @@ export default function AssetTransferPage() {
       setError("Please select a transfer date.");
       return;
     }
+
     if (
       (transferType === "employee" || transferType === "both") &&
       !newEmployeeId
@@ -769,27 +763,32 @@ export default function AssetTransferPage() {
       setError("Please select a new location.");
       return;
     }
-    if (
-      (transferType === "employee" || transferType === "both") &&
-      selectedAsset.assignedToId === newEmployeeId
-    ) {
-      setError("Asset is already assigned to this employee.");
-      return;
-    }
-    if (
-      (transferType === "location" || transferType === "both") &&
-      selectedAsset.locationId === newLocationId
-    ) {
-      setError("Asset is already at this location.");
-      return;
+
+    // Same-employee check
+    if (transferType === "employee" || transferType === "both") {
+      if (
+        selectedAsset.assignedToId &&
+        selectedAsset.assignedToId === newEmployeeId
+      ) {
+        setError("Asset is already assigned to this employee.");
+        return;
+      }
     }
 
-    // ── FIX: Validate asset ID is numeric before doing anything ───────────
-    let numericAssetId: number;
-    try {
-      numericAssetId = parseAssetId(selectedAsset.id);
-    } catch (err) {
-      setError(getReadableErrorMessage(err, "Invalid asset ID."));
+    // Same-location check
+    if (transferType === "location" || transferType === "both") {
+      if (
+        selectedAsset.locationId &&
+        selectedAsset.locationId === newLocationId
+      ) {
+        setError("Asset is already at this location.");
+        return;
+      }
+    }
+
+    const numericAssetId = parseInt(selectedAsset.id, 10);
+    if (isNaN(numericAssetId)) {
+      setError("Invalid asset ID.");
       return;
     }
 
@@ -798,7 +797,96 @@ export default function AssetTransferPage() {
     setSuccess("");
 
     try {
-      // Step 1 — Update the asset record (employee / location fields)
+      const isEmployeeTransfer =
+        transferType === "employee" || transferType === "both";
+      const isLocationTransfer =
+        transferType === "location" || transferType === "both";
+
+      // ── Resolve previous employee id ──────────────────────────────────────
+      // asset.assignedToId is now correctly populated from AssetResponseDTO
+      const resolvePrevEmployeeId = (): number | null => {
+        if (!isEmployeeTransfer) return null;
+
+        // Shape 1 — flat assignedToId (correctly populated from AssetResponseDTO)
+        if (selectedAsset.assignedToId) {
+          const parsed = parseInt(String(selectedAsset.assignedToId), 10);
+          if (!isNaN(parsed)) return parsed;
+        }
+
+        // Shape 2 — nested object { id, name } (defensive fallback)
+        const assignedToRaw = selectedAsset.assignedTo as unknown;
+        if (
+          assignedToRaw &&
+          typeof assignedToRaw === "object" &&
+          "id" in (assignedToRaw as object)
+        ) {
+          const parsed = parseInt(
+            String((assignedToRaw as { id: unknown }).id),
+            10,
+          );
+          if (!isNaN(parsed)) return parsed;
+        }
+
+        // Shape 3 — name string "EMP001 - John", look up in employees list
+        const nameStr =
+          typeof assignedToRaw === "string" ? assignedToRaw : null;
+        if (nameStr) {
+          const namePart = nameStr.includes(" - ")
+            ? nameStr.split(" - ").slice(1).join(" - ").trim()
+            : nameStr.trim();
+          const match = employees.find(
+            (e) =>
+              e.name?.trim().toLowerCase() === namePart.toLowerCase() ||
+              `${e.empId} - ${e.name}`.toLowerCase() ===
+                nameStr.trim().toLowerCase(),
+          );
+          if (match) return Number(match.id);
+        }
+
+        return null;
+      };
+
+      // ── Resolve previous location id ──────────────────────────────────────
+      const resolvePrevLocationId = (): number | null => {
+        if (!isLocationTransfer) return null;
+
+        // Shape 1 — flat locationId (correctly populated from AssetResponseDTO)
+        if (selectedAsset.locationId) {
+          const parsed = parseInt(String(selectedAsset.locationId), 10);
+          if (!isNaN(parsed)) return parsed;
+        }
+
+        // Shape 2 — nested object { id, name } (defensive fallback)
+        const locationRaw = selectedAsset.location as unknown;
+        if (
+          locationRaw &&
+          typeof locationRaw === "object" &&
+          "id" in (locationRaw as object)
+        ) {
+          const parsed = parseInt(
+            String((locationRaw as { id: unknown }).id),
+            10,
+          );
+          if (!isNaN(parsed)) return parsed;
+        }
+
+        // Shape 3 — name string, look up in locations list
+        const nameStr = typeof locationRaw === "string" ? locationRaw : null;
+        if (nameStr) {
+          const match = locations.find(
+            (l) =>
+              l.name?.trim().toLowerCase() === nameStr.trim().toLowerCase(),
+          );
+          if (match) return Number(match.id);
+        }
+
+        return null;
+      };
+
+      const prevEmployeeNumericId = resolvePrevEmployeeId();
+      const prevLocationNumericId = resolvePrevLocationId();
+
+      // ── Step 1: Update the asset record ───────────────────────────────────
       const assetPayload = buildAssetPayload({
         asset: selectedAsset,
         transferType,
@@ -806,44 +894,43 @@ export default function AssetTransferPage() {
         newLocationId,
         locations,
       });
-
       const updatedAsset = await updateAssetRecord(
         selectedAsset.id,
         assetPayload,
       );
 
-      // Step 2 — Create the transfer audit record
-      // ── FIX: pass getTokenRef.current (GetTokenFn), not getToken directly ──
-      // ── FIX: assetId uses numericAssetId validated above — no NaN risk ─────
-      // ── FIX: TransferType / TransferDate use capital T to match the backend
-      //         AssetTransferDTO field names exactly (Lombok @Data generates
-      //         getTransferType() from `private String TransferType` — Jackson
-      //         therefore expects the JSON key "TransferType" not "transferType")
+      // ── Step 2: Create the audit transfer record ───────────────────────────
       const dto: AssetTransferDTO = {
         assetId: { id: numericAssetId },
-        TransferType: transferType, // capital T
-        TransferDate: transferDate, // capital T, "YYYY-MM-DD"
-        reason: reason.trim() || "N/A", // @NotNull — never empty
+        TransferType: transferType,
+        TransferDate: transferDate,
+        reason: reason.trim() || "N/A",
+        fromEmployeeId:
+          isEmployeeTransfer && prevEmployeeNumericId
+            ? { id: prevEmployeeNumericId }
+            : null,
+        toEmployeeId:
+          isEmployeeTransfer && newEmployeeId
+            ? { id: parseInt(newEmployeeId, 10) }
+            : null,
+        fromLocationId:
+          isLocationTransfer && prevLocationNumericId
+            ? { id: prevLocationNumericId }
+            : null,
+        toLocationId:
+          isLocationTransfer && newLocationId
+            ? { id: parseInt(newLocationId, 10) }
+            : null,
       };
-
-      // Temporary debug — remove after confirming payload is correct
-      console.log(
-        "[handleTransfer] Sending DTO:",
-        JSON.stringify(dto, null, 2),
-      );
 
       const savedTransfer = await createAssetTransfer(getTokenRef.current, dto);
 
-      // Update local asset list with the freshly updated record
       setAssets((prev) =>
         prev.map((item) => (item.id === updatedAsset.id ? updatedAsset : item)),
       );
       setSelectedAssetId(updatedAsset.id);
-
-      // Prepend new transfer to top of history
       setHistory((prev) => [savedTransfer, ...prev]);
 
-      // Reset form fields
       setTransferType("both");
       setNewEmployeeId("");
       setNewLocationId("");
@@ -852,8 +939,8 @@ export default function AssetTransferPage() {
 
       setSuccess(
         `Transfer complete — ${updatedAsset.assetCode} is now assigned to ${
-          updatedAsset.assignedTo || "nobody"
-        } at ${updatedAsset.location || "no location"}.`,
+          extractName(updatedAsset.assignedTo as unknown) || "nobody"
+        } at ${extractName(updatedAsset.location as unknown) || "no location"}.`,
       );
     } catch (err) {
       setError(getReadableErrorMessage(err, "Transfer failed."));
@@ -912,7 +999,6 @@ export default function AssetTransferPage() {
                 <CardTitle>Create Transfer</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Asset */}
                 <div className="space-y-2">
                   <Label>Select Asset *</Label>
                   <AssetCombobox
@@ -956,7 +1042,6 @@ export default function AssetTransferPage() {
                   </div>
                 </div>
 
-                {/* Employee */}
                 {(transferType === "employee" || transferType === "both") && (
                   <div className="space-y-2">
                     <Label>New Employee</Label>
@@ -969,7 +1054,6 @@ export default function AssetTransferPage() {
                   </div>
                 )}
 
-                {/* Location */}
                 {(transferType === "location" || transferType === "both") && (
                   <div className="space-y-2">
                     <Label>New Location</Label>
@@ -1052,7 +1136,8 @@ export default function AssetTransferPage() {
                         <div>
                           <p className="font-medium">Current Employee</p>
                           <p className="text-muted-foreground">
-                            {selectedAsset.assignedTo || "Not assigned"}
+                            {extractName(selectedAsset.assignedTo as unknown) ||
+                              "Not assigned"}
                           </p>
                         </div>
                       </div>
@@ -1061,7 +1146,8 @@ export default function AssetTransferPage() {
                         <div>
                           <p className="font-medium">Current Location</p>
                           <p className="text-muted-foreground">
-                            {selectedAsset.location || "No location"}
+                            {extractName(selectedAsset.location as unknown) ||
+                              "No location"}
                           </p>
                         </div>
                       </div>
@@ -1083,7 +1169,7 @@ export default function AssetTransferPage() {
                         <div>
                           <p className="font-medium">Serial Number</p>
                           <p className="text-muted-foreground">
-                            {selectedAsset.serialNo || "-"}
+                            {selectedAsset.serialNo || "—"}
                           </p>
                         </div>
                       </div>
@@ -1149,7 +1235,6 @@ export default function AssetTransferPage() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              {/* Table */}
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
@@ -1157,17 +1242,20 @@ export default function AssetTransferPage() {
                       <TableHead className="pl-6">Asset Code</TableHead>
                       <TableHead>Asset</TableHead>
                       <TableHead>Serial No</TableHead>
-                      <TableHead>Transfer Type</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>From Employee</TableHead>
+                      <TableHead>To Employee</TableHead>
+                      <TableHead>From Location</TableHead>
+                      <TableHead>To Location</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead className="pr-6">Reason</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {historyLoading ? (
-                      // Loading skeleton rows
                       Array.from({ length: historyPageSize }).map((_, i) => (
                         <TableRow key={i} className="animate-pulse">
-                          {Array.from({ length: 6 }).map((_, j) => (
+                          {Array.from({ length: 10 }).map((_, j) => (
                             <TableCell key={j}>
                               <div className="h-4 rounded bg-muted" />
                             </TableCell>
@@ -1183,22 +1271,68 @@ export default function AssetTransferPage() {
                           <TableCell>
                             {item.asset.brand} {item.asset.model}
                           </TableCell>
-                          <TableCell>{item.asset.serialNo || "-"}</TableCell>
+                          <TableCell>{item.asset.serialNo || "—"}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="capitalize">
                               {item.TransferType}
                             </Badge>
                           </TableCell>
-                          <TableCell>{item.TransferDate}</TableCell>
-                          <TableCell className="pr-6 max-w-[200px] truncate text-muted-foreground">
-                            {item.reason || "-"}
+                          <TableCell className="text-muted-foreground">
+                            {item.fromEmployee ? (
+                              <span className="flex items-center gap-1">
+                                <User className="h-3 w-3 shrink-0" />
+                                {item.fromEmployee.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {item.toEmployee ? (
+                              <span className="flex items-center gap-1 font-medium">
+                                <User className="h-3 w-3 shrink-0" />
+                                {item.toEmployee.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {item.fromLocation ? (
+                              <span className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3 shrink-0" />
+                                {item.fromLocation.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {item.toLocation ? (
+                              <span className="flex items-center gap-1 font-medium">
+                                <MapPin className="h-3 w-3 shrink-0" />
+                                {item.toLocation.name}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {item.TransferDate}
+                          </TableCell>
+                          <TableCell className="pr-6 max-w-[160px] truncate text-muted-foreground">
+                            {item.reason || "—"}
                           </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={10}
                           className="h-32 text-center text-muted-foreground"
                         >
                           No transfer history yet.
@@ -1209,23 +1343,22 @@ export default function AssetTransferPage() {
                 </Table>
               </div>
 
-              {/* ── Table Footer ── */}
+              {/* ── Pagination footer ── */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
-                {/* Left: Showing X–Y of Z */}
-                <span>
+                <p className="text-sm text-muted-foreground">
                   {historyTotalElements === 0
-                    ? "No records"
+                    ? "No results"
                     : `Showing ${historyPage * historyPageSize + 1}–${Math.min(
                         (historyPage + 1) * historyPageSize,
                         historyTotalElements,
                       )} of ${historyTotalElements}`}
-                </span>
+                </p>
 
-                {/* Right: Rows per page + « ‹ Page X of Y › » */}
                 <div className="flex items-center gap-4">
-                  {/* Rows per page */}
                   <div className="flex items-center gap-2">
-                    <span>Rows per page</span>
+                    <span className="text-sm text-muted-foreground">
+                      Rows per page
+                    </span>
                     <Select
                       value={String(historyPageSize)}
                       onValueChange={(v) => {
@@ -1247,7 +1380,6 @@ export default function AssetTransferPage() {
                     </Select>
                   </div>
 
-                  {/* First / Prev / Page X of Y / Next / Last */}
                   <div className="flex items-center gap-1">
                     <Button
                       variant="outline"

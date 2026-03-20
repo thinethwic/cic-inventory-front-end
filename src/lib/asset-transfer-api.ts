@@ -15,6 +15,19 @@ export type SpringPage<T> = {
     size: number;
 };
 
+// ─── Shared sub-types ─────────────────────────────────────────────────────────
+export type TransferEmployee = {
+    id: number;
+    empId: string;
+    name: string;
+};
+
+export type TransferLocation = {
+    id: number;
+    name: string;
+    code?: string;
+};
+
 // ─── Response shape ───────────────────────────────────────────────────────────
 export type AssetTransferResponse = {
     id: number;
@@ -35,23 +48,30 @@ export type AssetTransferResponse = {
         location?: string;
         locationId?: string;
     };
+    // ── Audit trail — these match the backend JSON field names exactly ────────
+    fromEmployee: TransferEmployee | null;
+    toEmployee: TransferEmployee | null;
+    fromLocation: TransferLocation | null;
+    toLocation: TransferLocation | null;
     createdAt: string;
     updatedAt: string;
 };
 
+// ─── Ref wrappers (match backend inner DTO classes) ───────────────────────────
+type EmployeeRef = { id: number };
+type LocationRef = { id: number };
+
 // ─── Request DTO ──────────────────────────────────────────────────────────────
-// Field names must match backend AssetTransferDTO exactly.
-// Lombok @Data on the backend generates getters from the literal field name:
-//   private String TransferType  →  getTransferType()
-//   private LocalDate TransferDate → getTransferDate()
-// Jackson therefore expects JSON keys "TransferType" and "TransferDate" (capital T).
-// assetId is typed as Asset entity — { id: number } maps to Asset.id.
-// reason is @NotNull — always send a non-null string.
 export type AssetTransferDTO = {
     assetId: { id: number };
-    TransferType: "employee" | "location" | "both";   // capital T — matches backend field
-    TransferDate: string;                              // capital T — "YYYY-MM-DD"
-    reason: string;                                    // @NotNull — never undefined/null
+    TransferType: "employee" | "location" | "both"; // capital T — matches backend field
+    TransferDate: string;                            // capital T — "YYYY-MM-DD"
+    reason: string;                            // @NotNull — never undefined/null
+    // ── From / To refs (nullable — only set when that type is involved) ───────
+    fromEmployeeId: EmployeeRef | null;
+    toEmployeeId: EmployeeRef | null;
+    fromLocationId: LocationRef | null;
+    toLocationId: LocationRef | null;
 };
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -97,7 +117,6 @@ async function apiFetch<T>(
     if (!res.ok) {
         if (isJson) {
             const body = await res.json().catch(() => ({}));
-            // Log full Spring error so we can see the real cause
             console.error("[apiFetch] Error body:", JSON.stringify(body, null, 2));
             const msg = body?.message ?? body?.error ?? `HTTP ${res.status}`;
             throw new Error(msg);
@@ -107,10 +126,7 @@ async function apiFetch<T>(
         throw new Error(`API ${res.status}: ${text || "Non-JSON response"}`);
     }
 
-    if (!isJson) {
-        throw new Error(`Expected JSON but received ${contentType}`);
-    }
-
+    if (!isJson) throw new Error(`Expected JSON but received ${contentType}`);
     return res.json() as Promise<T>;
 }
 
@@ -129,11 +145,6 @@ export async function fetchAssetTransfers(
 }
 
 // ─── Create transfer ──────────────────────────────────────────────────────────
-// JSON keys match backend AssetTransferDTO field names exactly:
-//   assetId      → Asset entity   { id: number }
-//   TransferType → String         capital T
-//   TransferDate → LocalDate      capital T, "YYYY-MM-DD"
-//   reason       → String         @NotNull, fallback to "N/A" if empty
 export async function createAssetTransfer(
     getToken: GetTokenFn,
     dto: AssetTransferDTO,
@@ -146,6 +157,10 @@ export async function createAssetTransfer(
                 TransferType: dto.TransferType,
                 TransferDate: dto.TransferDate,
                 reason: dto.reason.trim() || "N/A",
+                fromEmployeeId: dto.fromEmployeeId,
+                toEmployeeId: dto.toEmployeeId,
+                fromLocationId: dto.fromLocationId,
+                toLocationId: dto.toLocationId,
             }),
         }),
     );
@@ -176,9 +191,7 @@ export async function deleteAssetTransfer(
     id: number,
 ): Promise<void> {
     return withToken(getToken, (token) =>
-        apiFetch<void>(token, `/assetTransfers/${id}`, {
-            method: "DELETE",
-        }),
+        apiFetch<void>(token, `/assetTransfers/${id}`, { method: "DELETE" }),
     );
 }
 
@@ -187,26 +200,19 @@ export function useAssetTransferApi() {
     const { getToken } = useAuth();
 
     const getAll = React.useCallback(
-        (page = 0, size = 20) =>
-            fetchAssetTransfers(getToken, page, size),
+        (page = 0, size = 20) => fetchAssetTransfers(getToken, page, size),
         [getToken],
     );
-
     const create = React.useCallback(
-        (dto: AssetTransferDTO) =>
-            createAssetTransfer(getToken, dto),
+        (dto: AssetTransferDTO) => createAssetTransfer(getToken, dto),
         [getToken],
     );
-
     const update = React.useCallback(
-        (id: number, dto: AssetTransferDTO) =>
-            updateAssetTransfer(getToken, id, dto),
+        (id: number, dto: AssetTransferDTO) => updateAssetTransfer(getToken, id, dto),
         [getToken],
     );
-
     const remove = React.useCallback(
-        (id: number) =>
-            deleteAssetTransfer(getToken, id),
+        (id: number) => deleteAssetTransfer(getToken, id),
         [getToken],
     );
 
