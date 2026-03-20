@@ -1018,7 +1018,7 @@ function SupplierCombobox({
     const q = search.trim().toLowerCase();
     if (!q) return suppliers;
     return suppliers.filter((s) =>
-      [s.name, s.contactPerson, s.phone]
+      [s.name, s.contactPerson, s.phone_no]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -1117,7 +1117,9 @@ function SupplierCombobox({
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
                       {s.contactPerson && <span>{s.contactPerson}</span>}
-                      {s.phone && <span className="font-mono">{s.phone}</span>}
+                      {s.phone_no && (
+                        <span className="font-mono">{s.phone_no}</span>
+                      )}
                     </div>
                   </div>
                 </button>

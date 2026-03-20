@@ -101,7 +101,7 @@ export type Location = EntityBase & {
 export type Supplier = EntityBase & {
     name: string;
     contactPerson?: string;
-    phone?: string;
+    phone_no?: string;
     email?: string;
 };
 

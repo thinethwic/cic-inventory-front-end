@@ -716,7 +716,9 @@ export function SuppliersTab({
     return suppliers.filter(
       (s) =>
         !t ||
-        `${s.name} ${s.phone ?? ""} ${s.email ?? ""}`.toLowerCase().includes(t),
+        `${s.name} ${s.phone_no ?? ""} ${s.email ?? ""}`
+          .toLowerCase()
+          .includes(t),
     );
   }, [suppliers, q]);
 
@@ -730,7 +732,7 @@ export function SuppliersTab({
   };
   const openEdit = (s: Supplier) => {
     setEditing(s);
-    setForm({ name: s.name, phone: s.phone ?? "", email: s.email ?? "" });
+    setForm({ name: s.name, phone: s.phone_no ?? "", email: s.email ?? "" });
     setOpenForm(true);
   };
 
@@ -817,7 +819,7 @@ export function SuppliersTab({
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell className="text-muted-foreground">
-                        {s.phone || "-"}
+                        {s.phone_no || "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {s.email || "-"}
