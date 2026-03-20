@@ -27,7 +27,7 @@ export type EmployeePayload = {
 
 export type DepartmentPayload = { name: string; code: string };
 export type LocationPayload = { name: string; code: string };
-export type SupplierPayload = { name: string; phone?: string; email?: string };
+export type SupplierPayload = { name: string; phone_no?: string; email?: string };
 
 async function apiFetch<T>(
     token: string,

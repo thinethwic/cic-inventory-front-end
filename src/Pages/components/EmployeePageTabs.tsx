@@ -708,7 +708,7 @@ export function SuppliersTab({
   const [editing, setEditing] = React.useState<Supplier | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const blank: SupplierPayload = { name: "", phone: "", email: "" };
+  const blank: SupplierPayload = { name: "", phone_no: "", email: "" };
   const [form, setForm] = React.useState<SupplierPayload>(blank);
 
   const filtered = React.useMemo(() => {
@@ -732,7 +732,7 @@ export function SuppliersTab({
   };
   const openEdit = (s: Supplier) => {
     setEditing(s);
-    setForm({ name: s.name, phone: s.phone_no ?? "", email: s.email ?? "" });
+    setForm({ name: s.name, phone_no: s.phone_no ?? "", email: s.email ?? "" });
     setOpenForm(true);
   };
 
@@ -868,8 +868,8 @@ export function SuppliersTab({
             <div className="space-y-1">
               <FieldLabel>Phone</FieldLabel>
               <Input
-                value={form.phone ?? ""}
-                onChange={(e) => f("phone", e.target.value)}
+                value={form.phone_no ?? ""}
+                onChange={(e) => f("phone_no", e.target.value)}
                 disabled={saving}
               />
             </div>
