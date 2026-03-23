@@ -10,6 +10,11 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ChevronsUpDown,
+  MapPin,
+  Building2,
+  Search,
+  Check,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +50,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 import type { Department, Location, Supplier, Employee } from "@/types";
 import {
@@ -54,6 +64,7 @@ import {
   type LocationPayload,
   type SupplierPayload,
 } from "@/lib/management-api";
+import { cn } from "@/lib/utils";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
@@ -243,6 +254,266 @@ function usePagination<T>(items: T[], resetDeps: React.DependencyList) {
   }, [items, page, pageSize]);
 
   return { page, setPage, pageSize, setPageSize, totalPages, paged };
+}
+
+// ─── Department Combobox ──────────────────────────────────────────────────────
+interface DepartmentComboboxProps {
+  departments: Department[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}
+
+function DepartmentCombobox({
+  departments,
+  value,
+  onChange,
+  disabled,
+}: DepartmentComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return departments;
+    return departments.filter((d) =>
+      `${d.name} ${d.code}`.toLowerCase().includes(q),
+    );
+  }, [departments, search]);
+
+  const selected = departments.find((d) => String(d.id) === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.name}
+              </span>
+              {selected.code && (
+                <span className="truncate text-xs text-muted-foreground">
+                  · {selected.code}
+                </span>
+              )}
+            </span>
+          ) : (
+            "Search and select a department..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or code..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No departments found.
+            </div>
+          ) : (
+            filtered.map((d) => {
+              const isSelected = String(d.id) === value;
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(d.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="font-semibold text-foreground">
+                        {d.name}
+                      </span>
+                    </div>
+                    {d.code && (
+                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {d.code}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Location Combobox ────────────────────────────────────────────────────────
+interface LocationComboboxProps {
+  locations: Location[];
+  value: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}
+
+function LocationCombobox({
+  locations,
+  value,
+  onChange,
+  disabled,
+}: LocationComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return locations;
+    return locations.filter((l) =>
+      `${l.name} ${l.code}`.toLowerCase().includes(q),
+    );
+  }, [locations, search]);
+
+  const selected = locations.find((l) => String(l.id) === value);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          type="button"
+          className={cn(
+            "w-full justify-between font-normal",
+            !selected && "text-muted-foreground",
+          )}
+        >
+          {selected ? (
+            <span className="flex items-center gap-2 truncate">
+              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground">
+                {selected.name}
+              </span>
+              {selected.code && (
+                <span className="truncate text-xs text-muted-foreground">
+                  · {selected.code}
+                </span>
+              )}
+            </span>
+          ) : (
+            "Search and select a location..."
+          )}
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or code..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No locations found.
+            </div>
+          ) : (
+            filtered.map((l) => {
+              const isSelected = String(l.id) === value;
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(String(l.id));
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mt-0.5 h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="font-semibold text-foreground">
+                        {l.name}
+                      </span>
+                    </div>
+                    {l.code && (
+                      <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        {l.code}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // ─── EmployeesTab ─────────────────────────────────────────────────────────────
@@ -585,44 +856,26 @@ export function EmployeesTab({
                 />
               </div>
 
-              <div className="space-y-1">
+              {/* Department — searchable combobox */}
+              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <FieldLabel>Department *</FieldLabel>
-                <Select
+                <DepartmentCombobox
+                  departments={departments}
                   value={form.departmentId}
-                  onValueChange={(v) => f("departmentId", v)}
+                  onChange={(v) => f("departmentId", v)}
                   disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select department" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {departments.map((d) => (
-                      <SelectItem key={d.id} value={String(d.id)}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
               </div>
 
-              <div className="space-y-1">
+              {/* Location — searchable combobox */}
+              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <FieldLabel>Location *</FieldLabel>
-                <Select
+                <LocationCombobox
+                  locations={locations}
                   value={form.locationId}
-                  onValueChange={(v) => f("locationId", v)}
+                  onChange={(v) => f("locationId", v)}
                   disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select location" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {locations.map((l) => (
-                      <SelectItem key={l.id} value={String(l.id)}>
-                        {l.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
               </div>
 
               <div className="space-y-1">

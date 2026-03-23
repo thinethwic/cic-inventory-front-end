@@ -32,6 +32,15 @@ import {
   Check,
 } from "lucide-react";
 
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+
 import { useAuth } from "@clerk/clerk-react";
 import { useManagementApi } from "@/lib/management-api";
 import { useAssetApi } from "@/lib/api";
@@ -1132,8 +1141,103 @@ function SupplierCombobox({
   );
 }
 
+// ─── Searchable Combobox ──────────────────────────────────────────────────────
+interface ComboboxProps {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+  allLabel: string;
+  allValue?: string;
+  searchPlaceholder?: string;
+}
+
+const SearchCombobox = React.memo(function SearchCombobox({
+  value,
+  onValueChange,
+  options,
+  allLabel,
+  allValue = "All",
+  searchPlaceholder = "Search…",
+}: ComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const filtered = React.useMemo(() => {
+    const t = search.trim().toLowerCase();
+    if (!t) return options;
+    return options.filter((o) => o.toLowerCase().includes(t));
+  }, [options, search]);
+
+  const displayLabel = value === allValue ? allLabel : value || allLabel;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+          type="button"
+        >
+          <span className="truncate text-sm">{displayLabel}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[260px] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value={allValue}
+                onSelect={() => {
+                  onValueChange(allValue);
+                  setSearch("");
+                  setOpen(false);
+                }}
+              >
+                <Check
+                  className={`mr-2 h-4 w-4 ${value === allValue ? "opacity-100" : "opacity-0"}`}
+                />
+                {allLabel}
+              </CommandItem>
+              {filtered.map((opt) => (
+                <CommandItem
+                  key={opt}
+                  value={opt}
+                  onSelect={() => {
+                    onValueChange(opt);
+                    setSearch("");
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={`mr-2 h-4 w-4 ${value === opt ? "opacity-100" : "opacity-0"}`}
+                  />
+                  {opt}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+});
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Assets() {
+  // ── Filter state ─────────────────────────────────────────────────────────────
+  const [supplierFilter, setSupplierFilter] = React.useState("All");
+  const [locationFilter, setLocationFilter] = React.useState("All");
+
   const { isLoaded, isSignedIn } = useAuth();
   const managementApi = useManagementApi();
   const { getAll, getByScan, create, update, remove } = useAssetApi();
@@ -1157,8 +1261,6 @@ export default function Assets() {
     "All",
   );
   const [categoryFilter, setCategoryFilter] = React.useState<string>("All");
-  const [supplierFilter, setSupplierFilter] = React.useState<string>("All");
-  const [locationFilter, setLocationFilter] = React.useState<string>("All");
 
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(25);
@@ -1283,6 +1385,32 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
+  // ── Derived supplier options for filter ────────────────────────────────────
+  const supplierOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allAssets
+            .map((a) => a.supplierName?.trim())
+            .filter((s): s is string => !!s),
+        ),
+      ).sort(),
+    [allAssets],
+  );
+
+  // ── Derived location options for filter ────────────────────────────────────
+  const locationOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          allAssets
+            .map((a) => a.location?.trim())
+            .filter((l): l is string => !!l),
+        ),
+      ).sort(),
+    [allAssets],
+  );
+
   // ── Filter + sort ──────────────────────────────────────────────────────────
   const filteredAssets = React.useMemo(() => {
     const searchText = q.trim().toLowerCase();
@@ -1305,7 +1433,8 @@ export default function Assets() {
       const matchesCategory =
         categoryFilter === "All" || asset.category === categoryFilter;
       const matchesSupplier =
-        supplierFilter === "All" || String(asset.supplierId) === supplierFilter;
+        supplierFilter === "All" ||
+        asset.supplierName?.trim() === supplierFilter;
       const matchesLocation =
         locationFilter === "All" ||
         asset.location?.trim().toLowerCase() ===
@@ -1331,18 +1460,6 @@ export default function Assets() {
     sortKey,
     sortDir,
   ]);
-
-  const locationOptions = React.useMemo(
-    () =>
-      Array.from(
-        new Set(
-          allAssets
-            .map((a) => a.location?.trim())
-            .filter((l): l is string => !!l),
-        ),
-      ).sort(),
-    [allAssets],
-  );
 
   const totalFilteredPages = Math.max(
     Math.ceil(filteredAssets.length / pageSize),
@@ -1734,48 +1851,26 @@ export default function Assets() {
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Supplier</div>
-            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select supplier" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All</SelectItem>
-                {suppliers.length === 0 ? (
-                  <SelectItem value="__NONE__" disabled>
-                    {lookupLoading ? "Loading…" : "No suppliers registered"}
-                  </SelectItem>
-                ) : (
-                  suppliers.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            <SearchCombobox
+              value={supplierFilter}
+              onValueChange={setSupplierFilter}
+              options={supplierOptions}
+              placeholder="All Suppliers"
+              allLabel="All Suppliers"
+              searchPlaceholder="Search suppliers…"
+            />
           </div>
 
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Location</div>
-            <Select value={locationFilter} onValueChange={setLocationFilter}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select location" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All</SelectItem>
-                {locationOptions.length === 0 ? (
-                  <SelectItem value="__NONE__" disabled>
-                    {pageLoading ? "Loading…" : "No locations found"}
-                  </SelectItem>
-                ) : (
-                  locationOptions.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            <SearchCombobox
+              value={locationFilter}
+              onValueChange={setLocationFilter}
+              options={locationOptions}
+              placeholder="All Locations"
+              allLabel="All Locations"
+              searchPlaceholder="Search locations…"
+            />
           </div>
         </CardContent>
       </Card>
