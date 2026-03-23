@@ -28,6 +28,7 @@ import {
   Wrench,
   TrendingUp,
   MapPin,
+  Loader2,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -116,12 +117,13 @@ const StatusBadge = React.memo(function StatusBadge({
   return <Badge variant={variant}>{status}</Badge>;
 });
 
-// ─── KPI Summary Bar ────────────────────────────────────────────────────────────
+// ─── KPI Card — matches Dashboard style exactly ────────────────────────────────
 interface KpiCardProps {
   icon: React.ElementType;
   label: string;
   value: number | string;
   sub?: string;
+  loading?: boolean;
 }
 
 const KpiCard = React.memo(function KpiCard({
@@ -129,24 +131,25 @@ const KpiCard = React.memo(function KpiCard({
   label,
   value,
   sub,
+  loading,
 }: KpiCardProps) {
   return (
     <Card>
-      <CardContent className="flex items-center gap-4 py-5">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-          <Icon className="h-5 w-5 text-primary" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="text-2xl font-semibold tabular-nums leading-none">
-            {value}
-          </p>
-          {sub && (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {sub}
-            </p>
-          )}
-        </div>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {label}
+        </CardTitle>
+        <Icon className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        ) : (
+          <div className="text-2xl font-bold">{value}</div>
+        )}
+        <p className="mt-1 text-xs text-muted-foreground">
+          {loading ? "Loading…" : (sub ?? "Live from server")}
+        </p>
       </CardContent>
     </Card>
   );
@@ -157,12 +160,14 @@ interface ChartCardProps {
   title: string;
   children: React.ReactNode;
   empty: boolean;
+  loading?: boolean;
 }
 
 const ChartCard = React.memo(function ChartCard({
   title,
   children,
   empty,
+  loading,
 }: ChartCardProps) {
   return (
     <Card>
@@ -170,7 +175,11 @@ const ChartCard = React.memo(function ChartCard({
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
       <CardContent className="h-[300px]">
-        {empty ? (
+        {loading ? (
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : empty ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             No data available
           </div>
@@ -396,32 +405,6 @@ const PaginationControls = React.memo(function PaginationControls({
             <ChevronsRight className="h-4 w-4" />
           </Button>
         </div>
-      </div>
-    </div>
-  );
-});
-
-// ─── Loading Skeleton ──────────────────────────────────────────────────────────
-const LoadingSkeleton = React.memo(function LoadingSkeleton() {
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="py-5">
-              <div className="h-16 animate-pulse rounded bg-muted" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="py-16">
-              <div className="mx-auto h-6 w-32 animate-pulse rounded bg-muted" />
-            </CardContent>
-          </Card>
-        ))}
       </div>
     </div>
   );
@@ -754,251 +737,257 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {loading ? (
-        <LoadingSkeleton />
-      ) : (
-        <>
-          {/* ── KPI Summary ─────────────────────────────────────────────────── */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <KpiCard
-              icon={Package}
-              label="Total Assets"
-              value={assets.length}
-              sub={`${kpiData.assigned} assigned`}
-            />
-            <KpiCard
-              icon={TrendingUp}
-              label="In Repair"
-              value={kpiData.inRepair}
-              sub="currently being serviced"
-            />
-            <KpiCard
-              icon={Wrench}
-              label="Open Maintenance"
-              value={kpiData.openMaintenance}
-              sub={`of ${maintenance.length} total`}
-            />
-            <KpiCard
-              icon={MapPin}
-              label="Locations"
-              value={kpiData.uniqueLocations}
-              sub="unique sites"
-            />
-          </div>
+      {/* ── KPI Summary ─────────────────────────────────────────────────── */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          icon={Package}
+          label="Total Assets"
+          value={assets.length}
+          sub={`${kpiData.assigned} assigned`}
+          loading={loading}
+        />
+        <KpiCard
+          icon={TrendingUp}
+          label="In Repair"
+          value={kpiData.inRepair}
+          sub="currently being serviced"
+          loading={loading}
+        />
+        <KpiCard
+          icon={Wrench}
+          label="Open Maintenance"
+          value={kpiData.openMaintenance}
+          sub={`of ${maintenance.length} total`}
+          loading={loading}
+        />
+        <KpiCard
+          icon={MapPin}
+          label="Locations"
+          value={kpiData.uniqueLocations}
+          sub="unique sites"
+          loading={loading}
+        />
+      </div>
 
-          {/* ── Charts Row 1 ─────────────────────────────────────────────────── */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <ChartCard
-              title="Asset Status Distribution"
-              empty={assetStatusData.length === 0}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={assetStatusData}
-                    dataKey="value"
-                    nameKey="name"
-                    outerRadius={110}
-                    label
-                  >
-                    {assetStatusData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
+      {/* ── Charts Row 1 ─────────────────────────────────────────────────── */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <ChartCard
+          title="Asset Status Distribution"
+          empty={assetStatusData.length === 0}
+          loading={loading}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={assetStatusData}
+                dataKey="value"
+                nameKey="name"
+                outerRadius={110}
+                label
+              >
+                {assetStatusData.map((_, i) => (
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
-            <ChartCard
-              title="Assets by Category"
-              empty={assetCategoryData.length === 0}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={assetCategoryData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
+        <ChartCard
+          title="Assets by Category"
+          empty={assetCategoryData.length === 0}
+          loading={loading}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={assetCategoryData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Bar dataKey="value" fill="#3b82f6" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
 
-          {/* ── Charts Row 2 ─────────────────────────────────────────────────── */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <ChartCard
-              title="Maintenance by Status"
-              empty={maintenanceStatusData.length === 0}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={maintenanceStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#22c55e" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
+      {/* ── Charts Row 2 ─────────────────────────────────────────────────── */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <ChartCard
+          title="Maintenance by Status"
+          empty={maintenanceStatusData.length === 0}
+          loading={loading}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={maintenanceStatusData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+              <Tooltip />
+              <Bar dataKey="value" fill="#22c55e" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
 
-            <ChartCard
-              title="Maintenance by Priority"
-              empty={maintenancePriorityData.length === 0}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={maintenancePriorityData}
-                    dataKey="value"
-                    nameKey="name"
-                    outerRadius={110}
-                    label
-                  >
-                    {maintenancePriorityData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
+        <ChartCard
+          title="Maintenance by Priority"
+          empty={maintenancePriorityData.length === 0}
+          loading={loading}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={maintenancePriorityData}
+                dataKey="value"
+                nameKey="name"
+                outerRadius={110}
+                label
+              >
+                {maintenancePriorityData.map((_, i) => (
+                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip />
+              <Legend />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
 
-          {/* ── Filtered Asset Report ─────────────────────────────────────────── */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-muted-foreground" />
-                  <CardTitle className="text-base">
-                    Filtered Asset Report
-                  </CardTitle>
-                  {hasActiveFilters && (
-                    <span className="text-xs text-muted-foreground">
-                      — {filteredAssets.length} result
-                      {filteredAssets.length !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {hasActiveFilters && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearFilters}
-                      type="button"
-                    >
-                      Clear all
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    className="gap-2"
-                    onClick={handleDownloadFilteredPdf}
-                    type="button"
-                    disabled={filteredAssets.length === 0}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download PDF
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-2"
-                    onClick={handleDownloadFilteredExcel}
-                    type="button"
-                    disabled={filteredAssets.length === 0}
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" />
-                    Download Excel
-                  </Button>
-                </div>
-              </div>
-
-              {/* Active filter pills */}
+      {/* ── Filtered Asset Report ─────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Filtered Asset Report</CardTitle>
               {hasActiveFilters && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {activeFilters.map((f) => (
-                    <FilterPill
-                      key={f.label}
-                      label={f.label}
-                      onRemove={f.onRemove}
-                    />
-                  ))}
-                </div>
+                <span className="text-xs text-muted-foreground">
+                  — {filteredAssets.length} result
+                  {filteredAssets.length !== 1 ? "s" : ""}
+                </span>
               )}
-            </CardHeader>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {hasActiveFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  type="button"
+                >
+                  Clear all
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="gap-2"
+                onClick={handleDownloadFilteredPdf}
+                type="button"
+                disabled={filteredAssets.length === 0}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download PDF
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={handleDownloadFilteredExcel}
+                type="button"
+                disabled={filteredAssets.length === 0}
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+                Download Excel
+              </Button>
+            </div>
+          </div>
 
-            <CardContent className="space-y-4">
-              {/* Filter controls */}
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Supplier</div>
-                  <SearchCombobox
-                    value={filterSupplier}
-                    onValueChange={setFilterSupplier}
-                    options={supplierOptions}
-                    placeholder="All Suppliers"
-                    allLabel="All Suppliers"
-                    searchPlaceholder="Search suppliers…"
-                  />
-                </div>
+          {/* Active filter pills */}
+          {hasActiveFilters && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {activeFilters.map((f) => (
+                <FilterPill
+                  key={f.label}
+                  label={f.label}
+                  onRemove={f.onRemove}
+                />
+              ))}
+            </div>
+          )}
+        </CardHeader>
 
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Location</div>
-                  <SearchCombobox
-                    value={filterLocation}
-                    onValueChange={setFilterLocation}
-                    options={locationOptions}
-                    placeholder="All Locations"
-                    allLabel="All Locations"
-                    searchPlaceholder="Search locations…"
-                  />
-                </div>
+        <CardContent className="space-y-4">
+          {/* Filter controls */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Supplier</div>
+              <SearchCombobox
+                value={filterSupplier}
+                onValueChange={setFilterSupplier}
+                options={supplierOptions}
+                placeholder="All Suppliers"
+                allLabel="All Suppliers"
+                searchPlaceholder="Search suppliers…"
+              />
+            </div>
 
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">
-                    Assigned To
-                  </div>
-                  <SearchCombobox
-                    value={filterAssignedTo}
-                    onValueChange={setFilterAssignedTo}
-                    options={assignedToOptions}
-                    placeholder="All Employees"
-                    allLabel="All Employees"
-                    searchPlaceholder="Search employees…"
-                  />
-                </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Location</div>
+              <SearchCombobox
+                value={filterLocation}
+                onValueChange={setFilterLocation}
+                options={locationOptions}
+                placeholder="All Locations"
+                allLabel="All Locations"
+                searchPlaceholder="Search locations…"
+              />
+            </div>
 
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">
-                    Purchase Date From
-                  </div>
-                  <Input
-                    type="date"
-                    value={filterDateFrom}
-                    onChange={(e) => setFilterDateFrom(e.target.value)}
-                  />
-                </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Assigned To</div>
+              <SearchCombobox
+                value={filterAssignedTo}
+                onValueChange={setFilterAssignedTo}
+                options={assignedToOptions}
+                placeholder="All Employees"
+                allLabel="All Employees"
+                searchPlaceholder="Search employees…"
+              />
+            </div>
 
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">
-                    Purchase Date To
-                  </div>
-                  <Input
-                    type="date"
-                    value={filterDateTo}
-                    onChange={(e) => setFilterDateTo(e.target.value)}
-                  />
-                </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">
+                Purchase Date From
               </div>
+              <Input
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => setFilterDateFrom(e.target.value)}
+              />
+            </div>
 
-              {/* Results table */}
-              <div className="rounded-md border">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">
+                Purchase Date To
+              </div>
+              <Input
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => setFilterDateTo(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Results table */}
+          <div className="rounded-md border">
+            {loading ? (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1063,11 +1052,11 @@ export default function ReportsPage() {
                   onPageChange={setTablePage}
                   onPageSizeChange={setTablePageSize}
                 />
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
