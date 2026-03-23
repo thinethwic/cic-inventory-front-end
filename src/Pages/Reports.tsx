@@ -49,6 +49,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Check, ChevronsUpDown as ComboIcon } from "lucide-react";
 
 import type { Asset, Maintenance } from "@/types";
 import { useAssetApi } from "@/lib/api";
@@ -188,6 +202,97 @@ const FilterPill = React.memo(function FilterPill({
         <X className="h-3 w-3" />
       </button>
     </span>
+  );
+});
+
+// ─── Searchable Combobox ──────────────────────────────────────────────────────
+interface ComboboxProps {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+  allLabel: string;
+  allValue?: string;
+  searchPlaceholder?: string;
+}
+
+const SearchCombobox = React.memo(function SearchCombobox({
+  value,
+  onValueChange,
+  options,
+  allLabel,
+  allValue = "All",
+  searchPlaceholder = "Search…",
+}: ComboboxProps) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+
+  const filtered = React.useMemo(() => {
+    const t = search.trim().toLowerCase();
+    if (!t) return options;
+    return options.filter((o) => o.toLowerCase().includes(t));
+  }, [options, search]);
+
+  const displayLabel = value === allValue ? allLabel : value || allLabel;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+          type="button"
+        >
+          <span className="truncate text-sm">{displayLabel}</span>
+          <ComboIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[260px] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder={searchPlaceholder}
+            value={search}
+            onValueChange={setSearch}
+          />
+          <CommandList>
+            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value={allValue}
+                onSelect={() => {
+                  onValueChange(allValue);
+                  setSearch("");
+                  setOpen(false);
+                }}
+              >
+                <Check
+                  className={`mr-2 h-4 w-4 ${value === allValue ? "opacity-100" : "opacity-0"}`}
+                />
+                {allLabel}
+              </CommandItem>
+              {filtered.map((opt) => (
+                <CommandItem
+                  key={opt}
+                  value={opt}
+                  onSelect={() => {
+                    onValueChange(opt);
+                    setSearch("");
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={`mr-2 h-4 w-4 ${value === opt ? "opacity-100" : "opacity-0"}`}
+                  />
+                  {opt}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 });
 
@@ -833,64 +938,40 @@ export default function ReportsPage() {
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Supplier</div>
-                  <Select
+                  <SearchCombobox
                     value={filterSupplier}
                     onValueChange={setFilterSupplier}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All suppliers" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All Suppliers</SelectItem>
-                      {supplierOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={supplierOptions}
+                    placeholder="All Suppliers"
+                    allLabel="All Suppliers"
+                    searchPlaceholder="Search suppliers…"
+                  />
                 </div>
 
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Location</div>
-                  <Select
+                  <SearchCombobox
                     value={filterLocation}
                     onValueChange={setFilterLocation}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All locations" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All Locations</SelectItem>
-                      {locationOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={locationOptions}
+                    placeholder="All Locations"
+                    allLabel="All Locations"
+                    searchPlaceholder="Search locations…"
+                  />
                 </div>
 
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">
                     Assigned To
                   </div>
-                  <Select
+                  <SearchCombobox
                     value={filterAssignedTo}
                     onValueChange={setFilterAssignedTo}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All employees" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="All">All Employees</SelectItem>
-                      {assignedToOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={assignedToOptions}
+                    placeholder="All Employees"
+                    allLabel="All Employees"
+                    searchPlaceholder="Search employees…"
+                  />
                 </div>
 
                 <div className="space-y-1">
@@ -924,10 +1005,10 @@ export default function ReportsPage() {
                       <TableHead>Asset Code</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Model</TableHead>
-                      <TableHead>Serial No</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Assigned To</TableHead>
+                      <TableHead>Supplier</TableHead>
                       <TableHead>Purchase Date</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -953,9 +1034,6 @@ export default function ReportsPage() {
                           <TableCell className="text-muted-foreground">
                             {a.brand} {a.model}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {a.serialNo}
-                          </TableCell>
                           <TableCell>
                             <StatusBadge status={a.status} />
                           </TableCell>
@@ -964,6 +1042,9 @@ export default function ReportsPage() {
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.assignedTo || "-"}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {a.supplierName ?? "-"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
                             {a.purchaseDate ?? "-"}
