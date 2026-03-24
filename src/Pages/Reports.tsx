@@ -65,9 +65,10 @@ import {
 } from "@/components/ui/popover";
 import { Check, ChevronsUpDown as ComboIcon } from "lucide-react";
 
-import type { Asset, Maintenance } from "@/types";
+import type { Asset, Maintenance, Employee } from "@/types";
 import { useAssetApi } from "@/lib/api";
 import { useMaintenanceApi } from "@/lib/maintainance-api";
+import { useManagementApi } from "@/lib/management-api";
 import {
   generateAssetReport,
   generateMaintenanceReport,
@@ -79,9 +80,17 @@ import {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
-const COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7"] as const;
+const COLORS = [
+  "#3b82f6",
+  "#22c55e",
+  "#f97316",
+  "#ef4444",
+  "#a855f7",
+  "#14b8a6",
+  "#f59e0b",
+  "#6366f1",
+] as const;
 
-// Asset status options — kept in sync with your data model
 const ASSET_STATUS_OPTIONS = [
   "Available",
   "Assigned",
@@ -93,20 +102,22 @@ const ASSET_STATUS_OPTIONS = [
 // ─── Types ──────────────────────────────────────────────────────────────────────
 type ChartRow = { name: string; value: number };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
-function buildCountData<T extends string>(items: T[]): ChartRow[] {
-  const map: Record<string, number> = {};
-  for (const x of items) map[x] = (map[x] ?? 0) + 1;
-  return Object.entries(map).map(([name, value]) => ({ name, value }));
-}
-
 interface FilterParams {
   supplierName?: string;
   location?: string;
   assignedTo?: string;
   status?: string;
+  department?: string;
+  category?: string;
   purchaseDateFrom?: string;
   purchaseDateTo?: string;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────────
+function buildCountData<T extends string>(items: T[]): ChartRow[] {
+  const map: Record<string, number> = {};
+  for (const x of items) map[x] = (map[x] ?? 0) + 1;
+  return Object.entries(map).map(([name, value]) => ({ name, value }));
 }
 
 // ─── Sub-components ─────────────────────────────────────────────────────────────
@@ -127,7 +138,6 @@ const StatusBadge = React.memo(function StatusBadge({
   return <Badge variant={variant}>{status}</Badge>;
 });
 
-// ─── KPI Card — matches Dashboard style exactly ────────────────────────────────
 interface KpiCardProps {
   icon: React.ElementType;
   label: string;
@@ -165,12 +175,13 @@ const KpiCard = React.memo(function KpiCard({
   );
 });
 
-// ─── Chart Card ────────────────────────────────────────────────────────────────
 interface ChartCardProps {
   title: string;
   children: React.ReactNode;
   empty: boolean;
   loading?: boolean;
+  /** Tailwind height class — defaults to "h-[300px]" */
+  heightClass?: string;
 }
 
 const ChartCard = React.memo(function ChartCard({
@@ -178,13 +189,14 @@ const ChartCard = React.memo(function ChartCard({
   children,
   empty,
   loading,
+  heightClass = "h-[300px]",
 }: ChartCardProps) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base">{title}</CardTitle>
       </CardHeader>
-      <CardContent className="h-[300px]">
+      <CardContent className={heightClass}>
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -201,7 +213,6 @@ const ChartCard = React.memo(function ChartCard({
   );
 });
 
-// ─── Filter Pill ───────────────────────────────────────────────────────────────
 const FilterPill = React.memo(function FilterPill({
   label,
   onRemove,
@@ -224,7 +235,6 @@ const FilterPill = React.memo(function FilterPill({
   );
 });
 
-// ─── Searchable Combobox ──────────────────────────────────────────────────────
 interface ComboboxProps {
   value: string;
   onValueChange: (v: string) => void;
@@ -315,7 +325,6 @@ const SearchCombobox = React.memo(function SearchCombobox({
   );
 });
 
-// ─── Pagination Controls ───────────────────────────────────────────────────────
 interface PaginationProps {
   total: number;
   page: number;
@@ -424,9 +433,11 @@ const PaginationControls = React.memo(function PaginationControls({
 export default function ReportsPage() {
   const { getAll: getAllAssets } = useAssetApi();
   const { getAll: getAllMaintenance } = useMaintenanceApi();
+  const { loadAssetLookups } = useManagementApi();
 
   const [assets, setAssets] = React.useState<Asset[]>([]);
   const [maintenance, setMaintenance] = React.useState<Maintenance[]>([]);
+  const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -434,7 +445,9 @@ export default function ReportsPage() {
   const [filterSupplier, setFilterSupplier] = React.useState("All");
   const [filterLocation, setFilterLocation] = React.useState("All");
   const [filterAssignedTo, setFilterAssignedTo] = React.useState("All");
-  const [filterStatus, setFilterStatus] = React.useState("All"); // ← NEW
+  const [filterStatus, setFilterStatus] = React.useState("All");
+  const [filterDepartment, setFilterDepartment] = React.useState("All");
+  const [filterCategory, setFilterCategory] = React.useState("All");
   const [filterDateFrom, setFilterDateFrom] = React.useState("");
   const [filterDateTo, setFilterDateTo] = React.useState("");
 
@@ -442,49 +455,75 @@ export default function ReportsPage() {
   const [tablePage, setTablePage] = React.useState(1);
   const [tablePageSize, setTablePageSize] = React.useState(25);
 
-  // Reset page when filters change
   React.useEffect(() => {
     setTablePage(1);
   }, [
     filterSupplier,
     filterLocation,
     filterAssignedTo,
-    filterStatus, // ← NEW
+    filterStatus,
+    filterDepartment,
+    filterCategory,
     filterDateFrom,
     filterDateTo,
   ]);
 
-  // ── Fetch — use refs to avoid unstable API function references ───────────────
+  // ── Stable refs ───────────────────────────────────────────────────────────────
   const getAllAssetsRef = React.useRef(getAllAssets);
   const getAllMaintenanceRef = React.useRef(getAllMaintenance);
+  const loadAssetLookupsRef = React.useRef(loadAssetLookups);
   React.useEffect(() => {
     getAllAssetsRef.current = getAllAssets;
   }, [getAllAssets]);
   React.useEffect(() => {
     getAllMaintenanceRef.current = getAllMaintenance;
   }, [getAllMaintenance]);
+  React.useEffect(() => {
+    loadAssetLookupsRef.current = loadAssetLookups;
+  }, [loadAssetLookups]);
 
   const fetchAll = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [assetList, maintenancePage] = await Promise.all([
+      const [assetList, maintenancePage, lookups] = await Promise.all([
         getAllAssetsRef.current(),
         getAllMaintenanceRef.current(0, 1000),
+        loadAssetLookupsRef.current(),
       ]);
       setAssets(Array.isArray(assetList) ? assetList : []);
       setMaintenance(maintenancePage.content ?? []);
+      setEmployees(lookups.employees ?? []);
     } catch (e) {
       console.error("Failed to load report data:", e);
       setError("Failed to load data. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, []); // stable — no API deps, uses refs
+  }, []);
 
   React.useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // ── Employee ID → department name map ─────────────────────────────────────────
+  const employeeDeptMap = React.useMemo((): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const emp of employees) {
+      if (emp.department?.name) {
+        map.set(String(emp.id), emp.department.name);
+      }
+    }
+    return map;
+  }, [employees]);
+
+  const getDepartment = React.useCallback(
+    (a: Asset): string =>
+      a.assignedToId
+        ? (employeeDeptMap.get(String(a.assignedToId)) ?? "Unassigned")
+        : "Unassigned",
+    [employeeDeptMap],
+  );
 
   // ── Derived dropdown options ──────────────────────────────────────────────────
   const supplierOptions = React.useMemo(
@@ -517,11 +556,26 @@ export default function ReportsPage() {
     [assets],
   );
 
-  // Status options — only include statuses that actually appear in the dataset
   const statusOptions = React.useMemo(() => {
     const present = new Set(assets.map((a) => a.status));
     return ASSET_STATUS_OPTIONS.filter((s) => present.has(s));
   }, [assets]);
+
+  const departmentOptions = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          assets.map((a) => getDepartment(a)).filter((d) => d !== "Unassigned"),
+        ),
+      ).sort(),
+    [assets, getDepartment],
+  );
+
+  const categoryOptions = React.useMemo(
+    () =>
+      Array.from(new Set(assets.map((a) => a.category).filter(Boolean))).sort(),
+    [assets],
+  );
 
   // ── KPI numbers ───────────────────────────────────────────────────────────────
   const kpiData = React.useMemo(() => {
@@ -562,8 +616,10 @@ export default function ReportsPage() {
           return false;
         if (filterAssignedTo !== "All" && a.assignedTo !== filterAssignedTo)
           return false;
-        if (filterStatus !== "All" && a.status !== filterStatus)
-          // ← NEW
+        if (filterStatus !== "All" && a.status !== filterStatus) return false;
+        if (filterDepartment !== "All" && getDepartment(a) !== filterDepartment)
+          return false;
+        if (filterCategory !== "All" && a.category !== filterCategory)
           return false;
         if (
           filterDateFrom &&
@@ -582,9 +638,12 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
-      filterStatus, // ← NEW
+      filterStatus,
+      filterDepartment,
+      filterCategory,
       filterDateFrom,
       filterDateTo,
+      getDepartment,
     ],
   );
 
@@ -598,7 +657,7 @@ export default function ReportsPage() {
     return filteredAssets.slice(start, start + tablePageSize);
   }, [filteredAssets, tablePage, tablePageSize]);
 
-  // ── Active filters ────────────────────────────────────────────────────────────
+  // ── Active filter pills ───────────────────────────────────────────────────────
   const activeFilters = React.useMemo(
     () =>
       [
@@ -615,9 +674,16 @@ export default function ReportsPage() {
           onRemove: () => setFilterAssignedTo("All"),
         },
         filterStatus !== "All" && {
-          // ← NEW
           label: `Status: ${filterStatus}`,
           onRemove: () => setFilterStatus("All"),
+        },
+        filterDepartment !== "All" && {
+          label: `Department: ${filterDepartment}`,
+          onRemove: () => setFilterDepartment("All"),
+        },
+        filterCategory !== "All" && {
+          label: `Category: ${filterCategory}`,
+          onRemove: () => setFilterCategory("All"),
         },
         filterDateFrom && {
           label: `From: ${filterDateFrom}`,
@@ -632,7 +698,9 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
-      filterStatus, // ← NEW
+      filterStatus,
+      filterDepartment,
+      filterCategory,
       filterDateFrom,
       filterDateTo,
     ],
@@ -644,18 +712,22 @@ export default function ReportsPage() {
     setFilterSupplier("All");
     setFilterLocation("All");
     setFilterAssignedTo("All");
-    setFilterStatus("All"); // ← NEW
+    setFilterStatus("All");
+    setFilterDepartment("All");
+    setFilterCategory("All");
     setFilterDateFrom("");
     setFilterDateTo("");
   }, []);
 
-  // ── Filter params (stable for download handlers) ───────────────────────────
+  // ── Filter params (for PDF/Excel generators) ──────────────────────────────────
   const filterParams = React.useMemo<FilterParams>(
     () => ({
       supplierName: filterSupplier !== "All" ? filterSupplier : undefined,
       location: filterLocation !== "All" ? filterLocation : undefined,
       assignedTo: filterAssignedTo !== "All" ? filterAssignedTo : undefined,
-      status: filterStatus !== "All" ? filterStatus : undefined, // ← NEW
+      status: filterStatus !== "All" ? filterStatus : undefined,
+      department: filterDepartment !== "All" ? filterDepartment : undefined,
+      category: filterCategory !== "All" ? filterCategory : undefined,
       purchaseDateFrom: filterDateFrom || undefined,
       purchaseDateTo: filterDateTo || undefined,
     }),
@@ -663,20 +735,22 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
-      filterStatus, // ← NEW
+      filterStatus,
+      filterDepartment,
+      filterCategory,
       filterDateFrom,
       filterDateTo,
     ],
   );
 
-  const handleDownloadFilteredPdf = React.useCallback(() => {
-    generateFilteredAssetReport(filteredAssets, filterParams);
-  }, [filteredAssets, filterParams]);
-
-  const handleDownloadFilteredExcel = React.useCallback(() => {
-    generateFilteredAssetReportExcel(filteredAssets, filterParams);
-  }, [filteredAssets, filterParams]);
-
+  const handleDownloadFilteredPdf = React.useCallback(
+    () => generateFilteredAssetReport(filteredAssets, filterParams),
+    [filteredAssets, filterParams],
+  );
+  const handleDownloadFilteredExcel = React.useCallback(
+    () => generateFilteredAssetReportExcel(filteredAssets, filterParams),
+    [filteredAssets, filterParams],
+  );
   const handleDownloadAssetsPdf = React.useCallback(
     () => generateAssetReport(assets),
     [assets],
@@ -697,7 +771,7 @@ export default function ReportsPage() {
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -761,14 +835,14 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Error */}
+      {/* ── Error ───────────────────────────────────────────────────────────── */}
       {error && (
         <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      {/* ── KPI Summary ─────────────────────────────────────────────────── */}
+      {/* ── KPI Summary ─────────────────────────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           icon={Package}
@@ -800,20 +874,27 @@ export default function ReportsPage() {
         />
       </div>
 
-      {/* ── Charts Row 1 ─────────────────────────────────────────────────── */}
+      {/* ── Charts Row 1: Status + Category ─────────────────────────────────── */}
       <div className="grid gap-6 md:grid-cols-2">
+        {/*
+          Pie charts need extra vertical space so the outer percentage labels
+          don't get clipped by the container edge.
+          outerRadius reduced from 110 → 95 and margin.top added as a belt-and-
+          braces fix on top of the taller container.
+        */}
         <ChartCard
           title="Asset Status Distribution"
           empty={assetStatusData.length === 0}
           loading={loading}
+          heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart margin={{ top: 20, right: 20, bottom: 0, left: 20 }}>
               <Pie
                 data={assetStatusData}
                 dataKey="value"
                 nameKey="name"
-                outerRadius={110}
+                outerRadius={95}
                 label
               >
                 {assetStatusData.map((_, i) => (
@@ -830,6 +911,7 @@ export default function ReportsPage() {
           title="Assets by Category"
           empty={assetCategoryData.length === 0}
           loading={loading}
+          heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={assetCategoryData}>
@@ -843,12 +925,13 @@ export default function ReportsPage() {
         </ChartCard>
       </div>
 
-      {/* ── Charts Row 2 ─────────────────────────────────────────────────── */}
+      {/* ── Charts Row 2: Maintenance ────────────────────────────────────────── */}
       <div className="grid gap-6 md:grid-cols-2">
         <ChartCard
           title="Maintenance by Status"
           empty={maintenanceStatusData.length === 0}
           loading={loading}
+          heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={maintenanceStatusData}>
@@ -865,14 +948,15 @@ export default function ReportsPage() {
           title="Maintenance by Priority"
           empty={maintenancePriorityData.length === 0}
           loading={loading}
+          heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart margin={{ top: 20, right: 20, bottom: 0, left: 20 }}>
               <Pie
                 data={maintenancePriorityData}
                 dataKey="value"
                 nameKey="name"
-                outerRadius={110}
+                outerRadius={95}
                 label
               >
                 {maintenancePriorityData.map((_, i) => (
@@ -886,7 +970,7 @@ export default function ReportsPage() {
         </ChartCard>
       </div>
 
-      {/* ── Filtered Asset Report ─────────────────────────────────────────── */}
+      {/* ── Filtered Asset Report ─────────────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -935,7 +1019,6 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Active filter pills */}
           {hasActiveFilters && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {activeFilters.map((f) => (
@@ -950,8 +1033,8 @@ export default function ReportsPage() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {/* Filter controls — 6 columns to accommodate the new Status filter */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          {/* ── Filter controls ── */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 items-end">
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Supplier</div>
               <SearchCombobox
@@ -988,7 +1071,6 @@ export default function ReportsPage() {
               />
             </div>
 
-            {/* ── Asset Status filter (NEW) ── */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Status</div>
               <SearchCombobox
@@ -998,6 +1080,30 @@ export default function ReportsPage() {
                 placeholder="All Statuses"
                 allLabel="All Statuses"
                 searchPlaceholder="Search status…"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Department</div>
+              <SearchCombobox
+                value={filterDepartment}
+                onValueChange={setFilterDepartment}
+                options={departmentOptions}
+                placeholder="All Departments"
+                allLabel="All Departments"
+                searchPlaceholder="Search departments…"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Category</div>
+              <SearchCombobox
+                value={filterCategory}
+                onValueChange={setFilterCategory}
+                options={categoryOptions}
+                placeholder="All Categories"
+                allLabel="All Categories"
+                searchPlaceholder="Search categories…"
               />
             </div>
 
@@ -1049,7 +1155,7 @@ export default function ReportsPage() {
                     {paginatedAssets.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className="py-8 text-center text-muted-foreground"
                         >
                           No assets match the selected filters.
@@ -1077,10 +1183,10 @@ export default function ReportsPage() {
                             {a.location}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {a.assignedTo || "-"}
+                            {a.assignedTo || "—"}
                           </TableCell>
                           <TableCell className="text-muted-foreground">
-                            {a.purchaseDate ?? "-"}
+                            {a.purchaseDate ?? "—"}
                           </TableCell>
                         </TableRow>
                       ))

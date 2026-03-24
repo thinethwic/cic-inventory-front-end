@@ -203,16 +203,63 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
 };
 
 /* ─────────────────────────────────────────────────────────────────────────── */
-/* FILTERED ASSET REPORT — PDF                                                 */
+/* FILTERED ASSET REPORT — shared types                                        */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 export interface AssetReportFilters {
-    supplierName?: string;   // shown in header subtitle only — not in the table
+    supplierName?: string;
     location?: string;
     assignedTo?: string;
+    status?: string;       // ← added
+    department?: string;   // ← added
+    category?: string;     // ← added
     purchaseDateFrom?: string;
     purchaseDateTo?: string;
 }
+
+/** Builds a human-readable filter summary string from the active filters */
+function buildFilterSubtitle(filters: AssetReportFilters): string | undefined {
+    const parts: string[] = [];
+    if (filters.supplierName) parts.push(`Supplier: ${filters.supplierName}`);
+    if (filters.location) parts.push(`Location: ${filters.location}`);
+    if (filters.assignedTo) parts.push(`Assigned To: ${filters.assignedTo}`);
+    if (filters.status) parts.push(`Status: ${filters.status}`);
+    if (filters.department) parts.push(`Department: ${filters.department}`);
+    if (filters.category) parts.push(`Category: ${filters.category}`);
+    if (filters.purchaseDateFrom) parts.push(`From: ${filters.purchaseDateFrom}`);
+    if (filters.purchaseDateTo) parts.push(`To: ${filters.purchaseDateTo}`);
+    return parts.length > 0 ? `Filters — ${parts.join("  |  ")}` : undefined;
+}
+
+/** Builds an array of meta rows for Excel (title, date, filters, record count) */
+function buildExcelMetaRows(
+    filters: AssetReportFilters,
+    totalRecords: number,
+): (string | number)[][] {
+    const filterParts: string[] = [];
+    if (filters.supplierName) filterParts.push(`Supplier: ${filters.supplierName}`);
+    if (filters.location) filterParts.push(`Location: ${filters.location}`);
+    if (filters.assignedTo) filterParts.push(`Assigned To: ${filters.assignedTo}`);
+    if (filters.status) filterParts.push(`Status: ${filters.status}`);
+    if (filters.department) filterParts.push(`Department: ${filters.department}`);
+    if (filters.category) filterParts.push(`Category: ${filters.category}`);
+    if (filters.purchaseDateFrom) filterParts.push(`From: ${filters.purchaseDateFrom}`);
+    if (filters.purchaseDateTo) filterParts.push(`To: ${filters.purchaseDateTo}`);
+
+    return [
+        [COMPANY_NAME],
+        [`Generated: ${new Date().toLocaleDateString()}`],
+        ...(filterParts.length > 0
+            ? [[`Filters: ${filterParts.join("  |  ")}`]]
+            : []),
+        [`Total Records: ${totalRecords}`],
+        [],
+    ];
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+/* FILTERED ASSET REPORT — PDF                                                 */
+/* ─────────────────────────────────────────────────────────────────────────── */
 
 export const generateFilteredAssetReport = async (
     assets: Asset[],
@@ -221,14 +268,7 @@ export const generateFilteredAssetReport = async (
     const doc = new jsPDF();
     const logo = await loadLogoAsDataURL(LOGO_PATH);
 
-    const parts: string[] = [];
-    if (filters.supplierName) parts.push(`Supplier: ${filters.supplierName}`);
-    if (filters.location) parts.push(`Location: ${filters.location}`);
-    if (filters.assignedTo) parts.push(`Assigned To: ${filters.assignedTo}`);
-    if (filters.purchaseDateFrom) parts.push(`From: ${filters.purchaseDateFrom}`);
-    if (filters.purchaseDateTo) parts.push(`To: ${filters.purchaseDateTo}`);
-    const subtitle = parts.length > 0 ? `Filters — ${parts.join("  |  ")}` : undefined;
-
+    const subtitle = buildFilterSubtitle(filters);
     const startY = addReportHeader(doc, COMPANY_NAME, logo, subtitle);
 
     const rows = assets.map((a) => [
@@ -280,20 +320,7 @@ export const generateFilteredAssetReportExcel = (
         a.warrantyEnd ?? "",
     ]);
 
-    const filterParts: string[] = [];
-    if (filters.supplierName) filterParts.push(`Supplier: ${filters.supplierName}`);
-    if (filters.location) filterParts.push(`Location: ${filters.location}`);
-    if (filters.assignedTo) filterParts.push(`Assigned To: ${filters.assignedTo}`);
-    if (filters.purchaseDateFrom) filterParts.push(`From: ${filters.purchaseDateFrom}`);
-    if (filters.purchaseDateTo) filterParts.push(`To: ${filters.purchaseDateTo}`);
-
-    const metaRows: (string | number)[][] = [
-        [COMPANY_NAME],
-        [`Generated: ${new Date().toLocaleDateString()}`],
-        ...(filterParts.length > 0 ? [[`Filters: ${filterParts.join("  |  ")}`]] : []),
-        [`Total Records: ${assets.length}`],
-        [],
-    ];
+    const metaRows = buildExcelMetaRows(filters, assets.length);
 
     const wsData = [...metaRows, headers, ...rows];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
