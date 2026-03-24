@@ -148,6 +148,7 @@ export default function EmployeesPage() {
         <DepartmentsTab
           departments={departments}
           setDepartments={setDepartments}
+          locations={locations}
           loading={loading}
           onDelete={(id, label) =>
             setDeleteTarget({ type: "department", id, label })

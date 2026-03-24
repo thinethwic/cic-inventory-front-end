@@ -25,7 +25,11 @@ export type EmployeePayload = {
     employeeStatus: "ACTIVE" | "INACTIVE";
 };
 
-export type DepartmentPayload = { name: string; code: string };
+export type DepartmentPayload = {
+    name: string;
+    code: string;
+    location: { id: number }; // ← FK reference to Location
+};
 export type LocationPayload = { name: string; code: string };
 export type SupplierPayload = { name: string; phone_no?: string; email?: string };
 

@@ -1160,13 +1160,21 @@ export function SuppliersTab({
 export interface DepartmentsTabProps {
   departments: Department[];
   setDepartments: React.Dispatch<React.SetStateAction<Department[]>>;
+  locations: Location[]; // ← NEW: needed to associate a location FK
   loading: boolean;
   onDelete: (id: number, label: string) => void;
 }
 
+type DepartmentFormState = {
+  name: string;
+  code: string;
+  locationId: string;
+};
+
 export function DepartmentsTab({
   departments,
   setDepartments,
+  locations,
   loading,
   onDelete,
 }: DepartmentsTabProps) {
@@ -1177,8 +1185,16 @@ export function DepartmentsTab({
   const [editing, setEditing] = React.useState<Department | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const blank: DepartmentPayload = { name: "", code: "" };
-  const [form, setForm] = React.useState<DepartmentPayload>(blank);
+  const blankForm = React.useCallback(
+    (): DepartmentFormState => ({
+      name: "",
+      code: "",
+      locationId: String(locations[0]?.id ?? ""),
+    }),
+    [locations],
+  );
+
+  const [form, setForm] = React.useState<DepartmentFormState>(blankForm);
 
   const filtered = React.useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -1192,27 +1208,38 @@ export function DepartmentsTab({
 
   const openAdd = () => {
     setEditing(null);
-    setForm(blank);
+    setForm(blankForm());
     setOpenForm(true);
   };
+
   const openEdit = (d: Department) => {
     setEditing(d);
-    setForm({ name: d.name, code: d.code });
+    setForm({
+      name: d.name,
+      code: d.code,
+      locationId: String((d as any).location?.id ?? locations[0]?.id ?? ""),
+    });
     setOpenForm(true);
   };
 
   const save = async () => {
     if (!form.name.trim()) return alert("Department name is required.");
     if (!form.code.trim()) return alert("Department code is required.");
+    if (!form.locationId) return alert("Location is required.");
     setSaving(true);
     try {
+      const payload: DepartmentPayload = {
+        name: form.name,
+        code: form.code,
+        location: { id: Number(form.locationId) },
+      };
       if (editing) {
-        const updated = await updateDepartment(editing.id, form);
+        const updated = await updateDepartment(editing.id, payload);
         setDepartments((p) =>
           p.map((x) => (x.id === editing.id ? updated : x)),
         );
       } else {
-        const created = await createDepartment(form);
+        const created = await createDepartment(payload);
         setDepartments((p) => [created, ...p]);
       }
       setOpenForm(false);
@@ -1223,7 +1250,7 @@ export function DepartmentsTab({
     }
   };
 
-  const f = (k: keyof DepartmentPayload, v: string) =>
+  const f = (k: keyof DepartmentFormState, v: string) =>
     setForm((p) => ({ ...p, [k]: v }));
 
   return (
@@ -1273,20 +1300,26 @@ export function DepartmentsTab({
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Code</TableHead>
+                  <TableHead>Location</TableHead>
+                  {/* ← NEW column */}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <LoadingRow colSpan={3} />
+                  <LoadingRow colSpan={4} />
                 ) : paged.length === 0 ? (
-                  <EmptyRow colSpan={3} text="No departments found." />
+                  <EmptyRow colSpan={4} text="No departments found." />
                 ) : (
                   paged.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.name}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {d.code}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {/* ← NEW cell: show the location name */}
+                        {(d as any).location?.name ?? "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <ActionMenu
@@ -1315,6 +1348,7 @@ export function DepartmentsTab({
         </CardContent>
       </Card>
 
+      {/* Form Dialog */}
       <Dialog open={openForm} onOpenChange={(o) => !saving && setOpenForm(o)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -1337,6 +1371,16 @@ export function DepartmentsTab({
                 value={form.code}
                 onChange={(e) => f("code", e.target.value)}
                 placeholder="FIN / IT / HR"
+                disabled={saving}
+              />
+            </div>
+            {/* ← NEW: Location searchable combobox */}
+            <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
+              <FieldLabel>Location *</FieldLabel>
+              <LocationCombobox
+                locations={locations}
+                value={form.locationId}
+                onChange={(v) => f("locationId", v)}
                 disabled={saving}
               />
             </div>
