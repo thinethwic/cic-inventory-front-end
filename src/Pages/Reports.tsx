@@ -81,6 +81,15 @@ import {
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const COLORS = ["#3b82f6", "#22c55e", "#f97316", "#ef4444", "#a855f7"] as const;
 
+// Asset status options — kept in sync with your data model
+const ASSET_STATUS_OPTIONS = [
+  "Available",
+  "Assigned",
+  "In Repair",
+  "Disposed",
+  "Damaged",
+] as const;
+
 // ─── Types ──────────────────────────────────────────────────────────────────────
 type ChartRow = { name: string; value: number };
 
@@ -95,6 +104,7 @@ interface FilterParams {
   supplierName?: string;
   location?: string;
   assignedTo?: string;
+  status?: string;
   purchaseDateFrom?: string;
   purchaseDateTo?: string;
 }
@@ -424,6 +434,7 @@ export default function ReportsPage() {
   const [filterSupplier, setFilterSupplier] = React.useState("All");
   const [filterLocation, setFilterLocation] = React.useState("All");
   const [filterAssignedTo, setFilterAssignedTo] = React.useState("All");
+  const [filterStatus, setFilterStatus] = React.useState("All"); // ← NEW
   const [filterDateFrom, setFilterDateFrom] = React.useState("");
   const [filterDateTo, setFilterDateTo] = React.useState("");
 
@@ -438,6 +449,7 @@ export default function ReportsPage() {
     filterSupplier,
     filterLocation,
     filterAssignedTo,
+    filterStatus, // ← NEW
     filterDateFrom,
     filterDateTo,
   ]);
@@ -505,6 +517,12 @@ export default function ReportsPage() {
     [assets],
   );
 
+  // Status options — only include statuses that actually appear in the dataset
+  const statusOptions = React.useMemo(() => {
+    const present = new Set(assets.map((a) => a.status));
+    return ASSET_STATUS_OPTIONS.filter((s) => present.has(s));
+  }, [assets]);
+
   // ── KPI numbers ───────────────────────────────────────────────────────────────
   const kpiData = React.useMemo(() => {
     const assigned = assets.filter((a) => a.status === "Assigned").length;
@@ -544,6 +562,9 @@ export default function ReportsPage() {
           return false;
         if (filterAssignedTo !== "All" && a.assignedTo !== filterAssignedTo)
           return false;
+        if (filterStatus !== "All" && a.status !== filterStatus)
+          // ← NEW
+          return false;
         if (
           filterDateFrom &&
           (a.purchaseDate == null || a.purchaseDate < filterDateFrom)
@@ -561,6 +582,7 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
+      filterStatus, // ← NEW
       filterDateFrom,
       filterDateTo,
     ],
@@ -592,6 +614,11 @@ export default function ReportsPage() {
           label: `Assigned To: ${filterAssignedTo}`,
           onRemove: () => setFilterAssignedTo("All"),
         },
+        filterStatus !== "All" && {
+          // ← NEW
+          label: `Status: ${filterStatus}`,
+          onRemove: () => setFilterStatus("All"),
+        },
         filterDateFrom && {
           label: `From: ${filterDateFrom}`,
           onRemove: () => setFilterDateFrom(""),
@@ -605,6 +632,7 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
+      filterStatus, // ← NEW
       filterDateFrom,
       filterDateTo,
     ],
@@ -616,6 +644,7 @@ export default function ReportsPage() {
     setFilterSupplier("All");
     setFilterLocation("All");
     setFilterAssignedTo("All");
+    setFilterStatus("All"); // ← NEW
     setFilterDateFrom("");
     setFilterDateTo("");
   }, []);
@@ -626,6 +655,7 @@ export default function ReportsPage() {
       supplierName: filterSupplier !== "All" ? filterSupplier : undefined,
       location: filterLocation !== "All" ? filterLocation : undefined,
       assignedTo: filterAssignedTo !== "All" ? filterAssignedTo : undefined,
+      status: filterStatus !== "All" ? filterStatus : undefined, // ← NEW
       purchaseDateFrom: filterDateFrom || undefined,
       purchaseDateTo: filterDateTo || undefined,
     }),
@@ -633,6 +663,7 @@ export default function ReportsPage() {
       filterSupplier,
       filterLocation,
       filterAssignedTo,
+      filterStatus, // ← NEW
       filterDateFrom,
       filterDateTo,
     ],
@@ -919,8 +950,8 @@ export default function ReportsPage() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          {/* Filter controls */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Filter controls — 6 columns to accommodate the new Status filter */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Supplier</div>
               <SearchCombobox
@@ -954,6 +985,19 @@ export default function ReportsPage() {
                 placeholder="All Employees"
                 allLabel="All Employees"
                 searchPlaceholder="Search employees…"
+              />
+            </div>
+
+            {/* ── Asset Status filter (NEW) ── */}
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Status</div>
+              <SearchCombobox
+                value={filterStatus}
+                onValueChange={setFilterStatus}
+                options={statusOptions}
+                placeholder="All Statuses"
+                allLabel="All Statuses"
+                searchPlaceholder="Search status…"
               />
             </div>
 

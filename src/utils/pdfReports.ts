@@ -6,10 +6,62 @@ import type { Asset } from "@/types";
 import type { Maintenance } from "@/types";
 
 /* ─────────────────────────────────────────────────────────────────────────── */
+/* Constants                                                                    */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+const LOGO_PATH = "/Logo.png";
+const COMPANY_NAME = "CIC Feeds Groups - Asset Inventory";
+
+/* ─────────────────────────────────────────────────────────────────────────── */
+/* Logo loader                                                                  */
+/* ─────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Loads a PNG logo and converts it to a base64 data URL for jsPDF.
+ * Returns null if the logo cannot be loaded (report still generates without it).
+ */
+async function loadLogoAsDataURL(logoPath: string): Promise<string | null> {
+    try {
+        const response = await fetch(logoPath);
+        if (!response.ok) return null;
+
+        const blob = await response.blob();
+
+        return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+        });
+    } catch {
+        return null;
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────── */
 /* Shared helpers                                                               */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-function addReportHeader(doc: jsPDF, title: string, subtitle?: string) {
+/**
+ * Adds the report header with logo on the right and title on the left.
+ * Returns the Y position where the table should start.
+ */
+function addReportHeader(
+    doc: jsPDF,
+    title: string,
+    logoDataURL: string | null,
+    subtitle?: string,
+) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Logo — top-right corner
+    if (logoDataURL) {
+        const logoW = 40;
+        const logoH = 14;
+        doc.addImage(logoDataURL, "PNG", pageWidth - logoW - 14, 12, logoW, logoH);
+    }
+
+    // Title & meta — left side
     doc.setFontSize(18);
     doc.text(title, 14, 20);
 
@@ -32,7 +84,7 @@ function saveWorkbook(wb: XLSX.WorkBook, filename: string) {
     XLSX.writeFile(wb, filename);
 }
 
-/** Style a header row in a worksheet (bold + blue fill) */
+/** Style a header row in a worksheet (bold + coloured fill) */
 function styleHeaderRow(
     ws: XLSX.WorkSheet,
     headers: string[],
@@ -53,9 +105,10 @@ function styleHeaderRow(
 /* ASSET REPORT — PDF (full)                                                   */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-export const generateAssetReport = (assets: Asset[]) => {
+export const generateAssetReport = async (assets: Asset[]) => {
     const doc = new jsPDF();
-    const startY = addReportHeader(doc, "Asset Inventory Report");
+    const logo = await loadLogoAsDataURL(LOGO_PATH);
+    const startY = addReportHeader(doc, COMPANY_NAME, logo);
 
     const rows = assets.map((a) => [
         a.assetCode,
@@ -65,13 +118,12 @@ export const generateAssetReport = (assets: Asset[]) => {
         a.status,
         a.location,
         a.assignedTo ?? "-",
-        a.supplierName ?? "-",
         a.purchaseDate ?? "-",
     ]);
 
     autoTable(doc, {
         startY,
-        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Supplier", "Purchase Date"]],
+        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Purchase Date"]],
         body: rows,
         styles: { fontSize: 8 },
         headStyles: { fillColor: [59, 130, 246] },
@@ -87,7 +139,7 @@ export const generateAssetReport = (assets: Asset[]) => {
 export const generateAssetReportExcel = (assets: Asset[]) => {
     const headers = [
         "Asset Code", "Category", "Brand", "Model", "Serial No",
-        "Status", "Location", "Assigned To", "Supplier",
+        "Status", "Location", "Assigned To",
         "Purchase Date", "Warranty End",
     ];
 
@@ -100,7 +152,6 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
         a.status,
         a.location,
         a.assignedTo ?? "",
-        a.supplierName ?? "",
         a.purchaseDate ?? "",
         a.warrantyEnd ?? "",
     ]);
@@ -109,32 +160,25 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     styleHeaderRow(ws, headers, "3B82F6");
 
-    // Auto column widths
     ws["!cols"] = headers.map((h, i) => ({
-        wch: Math.max(
-            h.length,
-            ...rows.map((r) => String(r[i] ?? "").length),
-        ) + 2,
+        wch: Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)) + 2,
     }));
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Assets");
 
-    // Summary sheet
     const statusCounts: Record<string, number> = {};
     const categoryCounts: Record<string, number> = {};
-    const supplierCounts: Record<string, number> = {};
     const locationCounts: Record<string, number> = {};
 
     assets.forEach((a) => {
         statusCounts[a.status] = (statusCounts[a.status] ?? 0) + 1;
         categoryCounts[a.category] = (categoryCounts[a.category] ?? 0) + 1;
-        if (a.supplierName) supplierCounts[a.supplierName] = (supplierCounts[a.supplierName] ?? 0) + 1;
         if (a.location) locationCounts[a.location] = (locationCounts[a.location] ?? 0) + 1;
     });
 
     const summaryRows: (string | number)[][] = [
-        ["CIC Asset Inventory — Summary"],
+        [COMPANY_NAME],
         [`Generated: ${new Date().toLocaleDateString()}`],
         [`Total Assets: ${assets.length}`],
         [],
@@ -145,10 +189,6 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
         ["── By Category ──"],
         ["Category", "Count"],
         ...Object.entries(categoryCounts),
-        [],
-        ["── By Supplier ──"],
-        ["Supplier", "Count"],
-        ...Object.entries(supplierCounts),
         [],
         ["── By Location ──"],
         ["Location", "Count"],
@@ -167,18 +207,19 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
 /* ─────────────────────────────────────────────────────────────────────────── */
 
 export interface AssetReportFilters {
-    supplierName?: string;
+    supplierName?: string;   // shown in header subtitle only — not in the table
     location?: string;
     assignedTo?: string;
     purchaseDateFrom?: string;
     purchaseDateTo?: string;
 }
 
-export const generateFilteredAssetReport = (
+export const generateFilteredAssetReport = async (
     assets: Asset[],
     filters: AssetReportFilters,
 ) => {
     const doc = new jsPDF();
+    const logo = await loadLogoAsDataURL(LOGO_PATH);
 
     const parts: string[] = [];
     if (filters.supplierName) parts.push(`Supplier: ${filters.supplierName}`);
@@ -188,7 +229,7 @@ export const generateFilteredAssetReport = (
     if (filters.purchaseDateTo) parts.push(`To: ${filters.purchaseDateTo}`);
     const subtitle = parts.length > 0 ? `Filters — ${parts.join("  |  ")}` : undefined;
 
-    const startY = addReportHeader(doc, "Filtered Asset Report", subtitle);
+    const startY = addReportHeader(doc, COMPANY_NAME, logo, subtitle);
 
     const rows = assets.map((a) => [
         a.assetCode,
@@ -198,13 +239,12 @@ export const generateFilteredAssetReport = (
         a.status,
         a.location,
         a.assignedTo ?? "-",
-        a.supplierName ?? "-",
         a.purchaseDate ?? "-",
     ]);
 
     autoTable(doc, {
         startY,
-        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Supplier", "Purchase Date"]],
+        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Purchase Date"]],
         body: rows,
         styles: { fontSize: 8 },
         headStyles: { fillColor: [168, 85, 247] },
@@ -223,7 +263,7 @@ export const generateFilteredAssetReportExcel = (
 ) => {
     const headers = [
         "Asset Code", "Category", "Brand", "Model", "Serial No",
-        "Status", "Location", "Assigned To", "Supplier",
+        "Status", "Location", "Assigned To",
         "Purchase Date", "Warranty End",
     ];
 
@@ -236,12 +276,10 @@ export const generateFilteredAssetReportExcel = (
         a.status,
         a.location,
         a.assignedTo ?? "",
-        a.supplierName ?? "",
         a.purchaseDate ?? "",
         a.warrantyEnd ?? "",
     ]);
 
-    // Build filter info rows at the top
     const filterParts: string[] = [];
     if (filters.supplierName) filterParts.push(`Supplier: ${filters.supplierName}`);
     if (filters.location) filterParts.push(`Location: ${filters.location}`);
@@ -250,17 +288,16 @@ export const generateFilteredAssetReportExcel = (
     if (filters.purchaseDateTo) filterParts.push(`To: ${filters.purchaseDateTo}`);
 
     const metaRows: (string | number)[][] = [
-        ["Filtered Asset Report"],
+        [COMPANY_NAME],
         [`Generated: ${new Date().toLocaleDateString()}`],
         ...(filterParts.length > 0 ? [[`Filters: ${filterParts.join("  |  ")}`]] : []),
         [`Total Records: ${assets.length}`],
-        [], // blank spacer row before data
+        [],
     ];
 
     const wsData = [...metaRows, headers, ...rows];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-    // Header row is at metaRows.length (0-indexed)
     const headerRowIdx = metaRows.length;
     headers.forEach((_, colIdx) => {
         const cellRef = XLSX.utils.encode_cell({ r: headerRowIdx, c: colIdx });
@@ -273,10 +310,7 @@ export const generateFilteredAssetReportExcel = (
     });
 
     ws["!cols"] = headers.map((h, i) => ({
-        wch: Math.max(
-            h.length,
-            ...rows.map((r) => String(r[i] ?? "").length),
-        ) + 2,
+        wch: Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)) + 2,
     }));
 
     const wb = XLSX.utils.book_new();
@@ -288,9 +322,10 @@ export const generateFilteredAssetReportExcel = (
 /* MAINTENANCE REPORT — PDF                                                    */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-export const generateMaintenanceReport = (maintenance: Maintenance[]) => {
+export const generateMaintenanceReport = async (maintenance: Maintenance[]) => {
     const doc = new jsPDF();
-    const startY = addReportHeader(doc, "Maintenance Report");
+    const logo = await loadLogoAsDataURL(LOGO_PATH);
+    const startY = addReportHeader(doc, COMPANY_NAME, logo);
 
     const rows = maintenance.map((m) => [
         m.ticketNo,
@@ -338,13 +373,9 @@ export const generateMaintenanceReportExcel = (maintenance: Maintenance[]) => {
     styleHeaderRow(ws, headers, "22C55E");
 
     ws["!cols"] = headers.map((h, i) => ({
-        wch: Math.max(
-            h.length,
-            ...rows.map((r) => String(r[i] ?? "").length),
-        ) + 2,
+        wch: Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)) + 2,
     }));
 
-    // Summary sheet
     const statusCounts: Record<string, number> = {};
     const priorityCounts: Record<string, number> = {};
     maintenance.forEach((m) => {
@@ -353,7 +384,7 @@ export const generateMaintenanceReportExcel = (maintenance: Maintenance[]) => {
     });
 
     const summaryRows: (string | number)[][] = [
-        ["Maintenance Report — Summary"],
+        [COMPANY_NAME],
         [`Generated: ${new Date().toLocaleDateString()}`],
         [`Total Tickets: ${maintenance.length}`],
         [],
