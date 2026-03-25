@@ -1,6 +1,13 @@
 // src/pages/MaintenancePage.tsx
 import * as React from "react";
 import {
+  useQuery,
+  useMutation,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
   Plus,
   Pencil,
   Trash2,
@@ -17,6 +24,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
 } from "lucide-react";
+import { useAuth } from "@clerk/clerk-react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -78,10 +87,31 @@ import {
   maintenancePriorityOptions,
   maintenanceStatusOptions,
 } from "@/types";
-import { useMaintenanceApi } from "@/lib/maintainance-api";
+import {
+  fetchMaintenancePage,
+  fetchAllAssetsForMaintenance,
+  fetchAllSuppliers,
+  createMaintenance,
+  updateMaintenance,
+  deleteMaintenance,
+  markMaintenanceCompleted,
+} from "@/lib/maintainance-api";
 import { useAssetApi } from "@/lib/api";
 
-// ─── Maintenance status → Asset status mapping ────────────────────────────────
+// ─── Query keys ───────────────────────────────────────────────────────────────
+const QK = {
+  maintenance: (
+    page: number,
+    size: number,
+    search: string,
+    status: string,
+    priority: string,
+  ) => ["maintenance", page, size, search, status, priority] as const,
+  assets: ["maintenance-assets"] as const,
+  suppliers: ["maintenance-suppliers"] as const,
+};
+
+// ─── Asset status mapping ─────────────────────────────────────────────────────
 function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
   switch (maintenanceStatus) {
     case "Open":
@@ -350,6 +380,7 @@ function SupplierCombobox({
         className="w-[--radix-popover-trigger-width] p-0"
         align="start"
         sideOffset={4}
+        onWheel={(e) => e.stopPropagation()}
       >
         <div className="flex items-center border-b px-3 py-2 gap-2">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -411,73 +442,57 @@ function SupplierCombobox({
 // ─── Technician Toggle ────────────────────────────────────────────────────────
 type TechnicianType = "internal" | "supplier";
 
-interface TechnicianToggleProps {
-  value: TechnicianType;
-  onChange: (v: TechnicianType) => void;
-  disabled?: boolean;
-}
-
 function TechnicianToggle({
   value,
   onChange,
   disabled,
-}: TechnicianToggleProps) {
+}: {
+  value: TechnicianType;
+  onChange: (v: TechnicianType) => void;
+  disabled?: boolean;
+}) {
   return (
     <div className="flex rounded-md border overflow-hidden w-fit">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange("internal")}
-        className={cn(
-          "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
-          value === "internal"
-            ? "bg-primary text-primary-foreground"
-            : "bg-background text-muted-foreground hover:bg-muted",
-        )}
-      >
-        <User className="h-3.5 w-3.5" /> Internal
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => onChange("supplier")}
-        className={cn(
-          "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors border-l",
-          value === "supplier"
-            ? "bg-primary text-primary-foreground"
-            : "bg-background text-muted-foreground hover:bg-muted",
-        )}
-      >
-        <Building2 className="h-3.5 w-3.5" /> Supplier
-      </button>
+      {(["internal", "supplier"] as TechnicianType[]).map((t) => (
+        <button
+          key={t}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(t)}
+          className={cn(
+            "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors",
+            t === "supplier" && "border-l",
+            value === t
+              ? "bg-primary text-primary-foreground"
+              : "bg-background text-muted-foreground hover:bg-muted",
+          )}
+        >
+          {t === "internal" ? (
+            <User className="h-3.5 w-3.5" />
+          ) : (
+            <Building2 className="h-3.5 w-3.5" />
+          )}
+          {t.charAt(0).toUpperCase() + t.slice(1)}
+        </button>
+      ))}
     </div>
   );
 }
 
-// ─── Page size options ────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function MaintenancePage() {
-  const {
-    getAll,
-    getAssets,
-    getSuppliers,
-    create,
-    update,
-    remove,
-    markCompleted,
-  } = useMaintenanceApi();
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
   const { updateStatus: updateAssetStatus } = useAssetApi();
 
-  const [assets, setAssets] = React.useState<Asset[]>([]);
-  const [suppliers, setSuppliers] = React.useState<Supplier[]>([]);
-  const [suppliersLoading, setSuppliersLoading] = React.useState(false);
-  const [rows, setRows] = React.useState<Maintenance[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  const getTokenRef = React.useRef(getToken);
 
-  // Filters
+  // ── Filters ────────────────────────────────────────────────────────────────
   const [q, setQ] = React.useState("");
+  const [debouncedQ, setDebouncedQ] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState<
     MaintenanceStatus | "All"
   >("All");
@@ -485,109 +500,82 @@ export default function MaintenancePage() {
     MaintenancePriority | "All"
   >("All");
 
-  // Pagination
+  // Debounce search input by 400ms to avoid hammering backend
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 400);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
   const [page, setPage] = React.useState(0);
   const [pageSize, setPageSize] = React.useState(25);
 
-  // Form
-  const [openForm, setOpenForm] = React.useState(false);
+  // Reset to page 0 when filters change
+  React.useEffect(() => {
+    setPage(0);
+  }, [debouncedQ, statusFilter, priorityFilter]);
+
+  // ── React Query: maintenance tickets (server-side paginated + filtered) ────
+  const {
+    data: maintenancePage,
+    isLoading,
+    isFetching,
+  } = useQuery({
+    queryKey: QK.maintenance(
+      page,
+      pageSize,
+      debouncedQ,
+      statusFilter,
+      priorityFilter,
+    ),
+    queryFn: () =>
+      fetchMaintenancePage(
+        getTokenRef.current,
+        page,
+        pageSize,
+        debouncedQ,
+        statusFilter,
+        priorityFilter,
+      ),
+    placeholderData: keepPreviousData,
+  });
+
+  const rows: Maintenance[] = maintenancePage?.content ?? [];
+  const totalElements = maintenancePage?.totalElements ?? 0;
+  const totalPages = maintenancePage?.totalPages ?? 1;
+
+  const rangeStart = totalElements === 0 ? 0 : page * pageSize + 1;
+  const rangeEnd = Math.min((page + 1) * pageSize, totalElements);
+
+  // ── React Query: assets for combobox ──────────────────────────────────────
+  const { data: assets = [] } = useQuery({
+    queryKey: QK.assets,
+    queryFn: () => fetchAllAssetsForMaintenance(getTokenRef.current),
+    staleTime: 1000 * 60 * 2,
+  });
+
+  // ── React Query: suppliers — only load when form opens ────────────────────
+  const [formOpen, setFormOpen] = React.useState(false);
+  const { data: suppliers = [], isLoading: suppliersLoading } = useQuery({
+    queryKey: QK.suppliers,
+    queryFn: () => fetchAllSuppliers(getTokenRef.current),
+    enabled: formOpen,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // ── Form state ─────────────────────────────────────────────────────────────
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] =
     React.useState<MaintenanceFormState>(emptyMaintenanceForm);
-  const [saving, setSaving] = React.useState(false);
-  const [formError, setFormError] = React.useState<string | null>(null);
   const [technicianType, setTechnicianType] =
     React.useState<TechnicianType>("internal");
-
-  // Dialogs
+  const [formError, setFormError] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [duplicateAssetId, setDuplicateAssetId] = React.useState<string | null>(
     null,
   );
 
-  // ── Data fetching ───────────────────────────────────────────────────────────
-  const fetchMaintenance = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const p = await getAll();
-      setRows(Array.isArray(p?.content) ? p.content : []);
-    } catch (e) {
-      console.error("Failed to load maintenance:", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [getAll]);
-
-  React.useEffect(() => {
-    fetchMaintenance();
-  }, [fetchMaintenance]);
-
-  React.useEffect(() => {
-    getAssets()
-      .then((p) => setAssets(Array.isArray(p?.content) ? p.content : []))
-      .catch((e) => {
-        console.error("Failed to load assets:", e);
-        setAssets([]);
-      });
-  }, [getAssets]);
-
-  React.useEffect(() => {
-    if (!openForm || suppliers.length > 0) return;
-    setSuppliersLoading(true);
-    getSuppliers()
-      .then((p) => setSuppliers(Array.isArray(p?.content) ? p.content : []))
-      .catch((e) => {
-        console.error("Failed to load suppliers:", e);
-        setSuppliers([]);
-      })
-      .finally(() => setSuppliersLoading(false));
-  }, [openForm, getSuppliers, suppliers.length]);
-
-  // ── Client-side filter ──────────────────────────────────────────────────────
-  const filtered = React.useMemo(() => {
-    const text = q.trim().toLowerCase();
-    return rows.filter((m) => {
-      const matchText =
-        !text ||
-        `${m.ticketNo} ${m.assetCode} ${m.issueTitle} ${m.assignedTo ?? ""}`
-          .toLowerCase()
-          .includes(text);
-      const matchStatus = statusFilter === "All" || m.status === statusFilter;
-      const matchPriority =
-        priorityFilter === "All" || m.priority === priorityFilter;
-      return matchText && matchStatus && matchPriority;
-    });
-  }, [rows, q, statusFilter, priorityFilter]);
-
-  // ── Reset to page 0 whenever filter changes ─────────────────────────────────
-  React.useEffect(() => {
-    setPage(0);
-  }, [q, statusFilter, priorityFilter]);
-
-  // ── Pagination derived values ───────────────────────────────────────────────
-  const totalElements = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(totalElements / pageSize));
-  const safePage = Math.min(page, totalPages - 1);
-  const pageRows = filtered.slice(
-    safePage * pageSize,
-    (safePage + 1) * pageSize,
-  );
-
-  const rangeStart = totalElements === 0 ? 0 : safePage * pageSize + 1;
-  const rangeEnd = Math.min((safePage + 1) * pageSize, totalElements);
-
-  // ── Active ticket check ─────────────────────────────────────────────────────
-  const hasActiveTicket = (assetId: string, excludeId?: string | null) =>
-    rows.some(
-      (m) =>
-        m.assetId === assetId &&
-        m.id !== excludeId &&
-        m.status !== "Completed" &&
-        m.status !== "Cancelled" &&
-        m.status !== "Cannot Repair",
-    );
-
-  // ── Dialog helpers ──────────────────────────────────────────────────────────
+  // ── Dialog helpers ─────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setFormError(null);
@@ -597,7 +585,7 @@ export default function MaintenancePage() {
       ticketNo: "",
       reportedDate: new Date().toISOString().slice(0, 10),
     });
-    setOpenForm(true);
+    setFormOpen(true);
   };
 
   const openEdit = (m: Maintenance) => {
@@ -618,7 +606,7 @@ export default function MaintenancePage() {
       cost: m.cost,
       notes: m.notes ?? "",
     });
-    setOpenForm(true);
+    setFormOpen(true);
   };
 
   const onAssetChange = (assetId: string) => {
@@ -626,12 +614,18 @@ export default function MaintenancePage() {
     setForm((p) => ({ ...p, assetId, assetCode: a?.assetCode ?? "" }));
   };
 
-  const handleTechnicianTypeChange = (t: TechnicianType) => {
-    setTechnicianType(t);
-    setForm((p) => ({ ...p, assignedTo: "" }));
-  };
+  // ── Active ticket check ────────────────────────────────────────────────────
+  const hasActiveTicket = (assetId: string, excludeId?: string | null) =>
+    rows.some(
+      (m) =>
+        m.assetId === assetId &&
+        m.id !== excludeId &&
+        m.status !== "Completed" &&
+        m.status !== "Cancelled" &&
+        m.status !== "Cannot Repair",
+    );
 
-  // ── Validate ────────────────────────────────────────────────────────────────
+  // ── Validate ───────────────────────────────────────────────────────────────
   const validate = (): string | null => {
     if (!form.assetId) return "Asset is required.";
     if (!form.issueTitle.trim()) return "Issue title is required.";
@@ -639,63 +633,59 @@ export default function MaintenancePage() {
     return null;
   };
 
-  // ── Save ────────────────────────────────────────────────────────────────────
-  const save = async () => {
-    const err = validate();
-    if (err) {
-      setFormError(err);
-      return;
-    }
-    setFormError(null);
+  // ── Save mutation ──────────────────────────────────────────────────────────
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const err = validate();
+      if (err) throw new Error(err);
 
-    if (!editingId && hasActiveTicket(form.assetId)) {
-      setDuplicateAssetId(form.assetId);
-      return;
-    }
-
-    setSaving(true);
-    try {
-      let savedAssetId = form.assetId;
+      if (!editingId && hasActiveTicket(form.assetId)) {
+        setDuplicateAssetId(form.assetId);
+        throw new Error("duplicate");
+      }
 
       if (editingId) {
-        const updated = await update(editingId, form);
-        setRows((p) => p.map((x) => (x.id === editingId ? updated : x)));
-        savedAssetId = updated.assetId;
-      } else {
-        const created = await create(form);
-        setRows((p) => [created, ...p]);
-        savedAssetId = created.assetId;
+        return updateMaintenance(getTokenRef.current, editingId, form);
       }
-
-      if (savedAssetId) {
-        await updateAssetStatus(savedAssetId, getAssetStatus(form.status));
-      }
-
-      setOpenForm(false);
+      return createMaintenance(getTokenRef.current, form);
+    },
+    onSuccess: async (saved) => {
+      await updateAssetStatus(saved.assetId, getAssetStatus(form.status));
+      void qc.invalidateQueries({ queryKey: ["maintenance"] });
+      setFormOpen(false);
       setEditingId(null);
       setTechnicianType("internal");
       setForm({ ...emptyMaintenanceForm, ticketNo: "" });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to save ticket.";
-      console.error("Save failed:", msg);
+      toast.success(editingId ? "Ticket updated" : "Ticket created", {
+        description: `${saved.ticketNo} — ${saved.issueTitle}`,
+      });
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : "Failed to save ticket.";
+      if (msg === "duplicate") return; // handled by duplicate dialog
       setFormError(msg);
-    } finally {
-      setSaving(false);
-    }
-  };
+      toast.error("Save failed", { description: msg });
+    },
+  });
 
-  // ── Delete ──────────────────────────────────────────────────────────────────
-  const confirmDelete = async () => {
-    if (!deleteId) return;
-    try {
-      const existing = rows.find((x) => x.id === deleteId);
-      await remove(deleteId);
-      setRows((p) => p.filter((x) => x.id !== deleteId));
+  // ── Delete mutation ────────────────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const existing = rows.find((x) => x.id === id);
+      await deleteMaintenance(getTokenRef.current, id);
 
       if (existing?.assetId) {
         const stillActive = rows.some(
           (m) =>
-            m.id !== deleteId &&
+            m.id !== id &&
+            m.assetId === existing.assetId &&
+            m.status !== "Completed" &&
+            m.status !== "Cancelled" &&
+            m.status !== "Cannot Repair",
+        );
+        const activeTicket = rows.find(
+          (m) =>
+            m.id !== id &&
             m.assetId === existing.assetId &&
             m.status !== "Completed" &&
             m.status !== "Cancelled" &&
@@ -704,40 +694,50 @@ export default function MaintenancePage() {
         await updateAssetStatus(
           existing.assetId,
           stillActive
-            ? getAssetStatus(
-                rows.find(
-                  (m) =>
-                    m.id !== deleteId &&
-                    m.assetId === existing.assetId &&
-                    m.status !== "Completed" &&
-                    m.status !== "Cancelled" &&
-                    m.status !== "Cannot Repair",
-                )?.status ?? "Open",
-              )
+            ? getAssetStatus(activeTicket?.status ?? "Open")
             : "Available",
         );
       }
-    } catch (e) {
-      console.error("Failed to delete ticket:", e);
-    } finally {
-      setDeleteId(null);
-    }
-  };
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["maintenance"] });
+      toast.success("Ticket deleted");
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof Error ? err.message : "Failed to delete ticket.";
+      toast.error("Delete failed", { description: msg });
+    },
+    onSettled: () => setDeleteId(null),
+  });
 
-  // ── Mark completed ──────────────────────────────────────────────────────────
-  const handleMarkCompleted = async (id: string) => {
-    const existing = rows.find((x) => x.id === id);
-    if (!existing) return;
-    try {
-      const updated = await markCompleted(id, existing);
-      setRows((p) => p.map((x) => (x.id === id ? updated : x)));
+  // ── Mark completed mutation ────────────────────────────────────────────────
+  const completeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const existing = rows.find((x) => x.id === id);
+      if (!existing) throw new Error("Ticket not found.");
+      const updated = await markMaintenanceCompleted(
+        getTokenRef.current,
+        id,
+        existing,
+      );
       await updateAssetStatus(existing.assetId, "Available");
-    } catch (e) {
-      console.error("Failed to mark completed:", e);
-    }
-  };
+      return updated;
+    },
+    onSuccess: (updated) => {
+      void qc.invalidateQueries({ queryKey: ["maintenance"] });
+      toast.success("Ticket completed", {
+        description: `${updated.ticketNo} marked as completed.`,
+      });
+    },
+    onError: (err) => {
+      const msg =
+        err instanceof Error ? err.message : "Failed to mark completed.";
+      toast.error("Action failed", { description: msg });
+    },
+  });
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -820,8 +820,6 @@ export default function MaintenancePage() {
             <span className="text-muted-foreground">({totalElements})</span>
           </CardTitle>
         </CardHeader>
-
-        {/* Table — no padding so footer border sits flush */}
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <Table>
@@ -838,7 +836,7 @@ export default function MaintenancePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading ? (
+                {isLoading ? (
                   <TableRow>
                     <TableCell colSpan={8} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
@@ -846,7 +844,7 @@ export default function MaintenancePage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : pageRows.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -856,8 +854,14 @@ export default function MaintenancePage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pageRows.map((m) => (
-                    <TableRow key={m.id} className="hover:bg-muted/30">
+                  rows.map((m) => (
+                    <TableRow
+                      key={m.id}
+                      className={cn(
+                        "hover:bg-muted/30",
+                        isFetching && "opacity-60 transition-opacity",
+                      )}
+                    >
                       <TableCell className="pl-6 font-medium">
                         {m.ticketNo}
                       </TableCell>
@@ -895,7 +899,7 @@ export default function MaintenancePage() {
                             {m.status !== "Completed" &&
                               m.status !== "Cannot Repair" && (
                                 <DropdownMenuItem
-                                  onClick={() => handleMarkCompleted(m.id)}
+                                  onClick={() => completeMutation.mutate(m.id)}
                                 >
                                   <CheckCircle2 className="mr-2 h-4 w-4" /> Mark
                                   Completed
@@ -920,16 +924,14 @@ export default function MaintenancePage() {
             </Table>
           </div>
 
-          {/* ── Pagination footer — matches Assets page PaginationControls style ── */}
+          {/* Pagination footer */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
             <p className="text-sm text-muted-foreground">
               {totalElements === 0
                 ? "No results"
                 : `Showing ${rangeStart}–${rangeEnd} of ${totalElements}`}
             </p>
-
             <div className="flex items-center gap-4">
-              {/* Rows per page */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
                   Rows per page
@@ -953,8 +955,6 @@ export default function MaintenancePage() {
                   </SelectContent>
                 </Select>
               </div>
-
-              {/* First / Prev / Page X of Y / Next / Last */}
               <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
@@ -962,7 +962,7 @@ export default function MaintenancePage() {
                   className="h-8 w-8"
                   type="button"
                   onClick={() => setPage(0)}
-                  disabled={safePage === 0}
+                  disabled={page === 0 || isFetching}
                   title="First page"
                 >
                   <ChevronsLeft className="h-4 w-4" />
@@ -973,13 +973,13 @@ export default function MaintenancePage() {
                   className="h-8 w-8"
                   type="button"
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={safePage === 0}
+                  disabled={page === 0 || isFetching}
                   title="Previous page"
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <span className="min-w-[90px] text-center text-sm text-muted-foreground">
-                  Page {safePage + 1} of {totalPages}
+                  Page {page + 1} of {totalPages}
                 </span>
                 <Button
                   variant="outline"
@@ -989,7 +989,7 @@ export default function MaintenancePage() {
                   onClick={() =>
                     setPage((p) => Math.min(totalPages - 1, p + 1))
                   }
-                  disabled={safePage + 1 >= totalPages}
+                  disabled={page + 1 >= totalPages || isFetching}
                   title="Next page"
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -1000,7 +1000,7 @@ export default function MaintenancePage() {
                   className="h-8 w-8"
                   type="button"
                   onClick={() => setPage(totalPages - 1)}
-                  disabled={safePage + 1 >= totalPages}
+                  disabled={page + 1 >= totalPages || isFetching}
                   title="Last page"
                 >
                   <ChevronsRight className="h-4 w-4" />
@@ -1013,9 +1013,9 @@ export default function MaintenancePage() {
 
       {/* Add / Edit Dialog */}
       <Dialog
-        open={openForm}
-        onOpenChange={(open) => {
-          if (!saving) setOpenForm(open);
+        open={formOpen}
+        onOpenChange={(o) => {
+          if (!saveMutation.isPending) setFormOpen(o);
         }}
       >
         <DialogContent className="sm:max-w-3xl">
@@ -1050,7 +1050,7 @@ export default function MaintenancePage() {
                   assets={assets}
                   value={form.assetId}
                   onChange={onAssetChange}
-                  disabled={saving}
+                  disabled={saveMutation.isPending}
                 />
               )}
             </div>
@@ -1063,7 +1063,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, issueTitle: e.target.value }))
                 }
                 placeholder="Battery health degraded"
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
 
@@ -1075,7 +1075,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, description: e.target.value }))
                 }
                 placeholder="Describe the issue briefly..."
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
 
@@ -1086,7 +1086,7 @@ export default function MaintenancePage() {
                 onValueChange={(v) =>
                   setForm((p) => ({ ...p, priority: v as MaintenancePriority }))
                 }
-                disabled={saving}
+                disabled={saveMutation.isPending}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1108,7 +1108,7 @@ export default function MaintenancePage() {
                 onValueChange={(v) =>
                   setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
                 }
-                disabled={saving}
+                disabled={saveMutation.isPending}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -1133,7 +1133,7 @@ export default function MaintenancePage() {
                 onChange={(e) =>
                   setForm((p) => ({ ...p, reportedDate: e.target.value }))
                 }
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
 
@@ -1145,7 +1145,7 @@ export default function MaintenancePage() {
                 onChange={(e) =>
                   setForm((p) => ({ ...p, dueDate: e.target.value }))
                 }
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
 
@@ -1154,8 +1154,11 @@ export default function MaintenancePage() {
                 <div className="text-xs text-muted-foreground">Assigned To</div>
                 <TechnicianToggle
                   value={technicianType}
-                  onChange={handleTechnicianTypeChange}
-                  disabled={saving}
+                  onChange={(t) => {
+                    setTechnicianType(t);
+                    setForm((p) => ({ ...p, assignedTo: "" }));
+                  }}
+                  disabled={saveMutation.isPending}
                 />
               </div>
               {technicianType === "supplier" ? (
@@ -1165,7 +1168,7 @@ export default function MaintenancePage() {
                   onChange={(name) =>
                     setForm((p) => ({ ...p, assignedTo: name }))
                   }
-                  disabled={saving}
+                  disabled={saveMutation.isPending}
                   loading={suppliersLoading}
                 />
               ) : (
@@ -1175,7 +1178,7 @@ export default function MaintenancePage() {
                     setForm((p) => ({ ...p, assignedTo: e.target.value }))
                   }
                   placeholder="Technician name"
-                  disabled={saving}
+                  disabled={saveMutation.isPending}
                 />
               )}
             </div>
@@ -1195,7 +1198,7 @@ export default function MaintenancePage() {
                   }))
                 }
                 placeholder="0"
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
 
@@ -1207,7 +1210,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, notes: e.target.value }))
                 }
                 placeholder="Extra notes..."
-                disabled={saving}
+                disabled={saveMutation.isPending}
               />
             </div>
           </div>
@@ -1215,14 +1218,20 @@ export default function MaintenancePage() {
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setOpenForm(false)}
+              onClick={() => setFormOpen(false)}
               type="button"
-              disabled={saving}
+              disabled={saveMutation.isPending}
             >
               Cancel
             </Button>
-            <Button onClick={save} type="button" disabled={saving}>
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Button
+              onClick={() => saveMutation.mutate()}
+              type="button"
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               {editingId ? "Save Changes" : "Create Ticket"}
             </Button>
           </DialogFooter>
@@ -1232,7 +1241,7 @@ export default function MaintenancePage() {
       {/* Duplicate asset warning */}
       <AlertDialog
         open={!!duplicateAssetId}
-        onOpenChange={(open) => !open && setDuplicateAssetId(null)}
+        onOpenChange={(o) => !o && setDuplicateAssetId(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1252,7 +1261,7 @@ export default function MaintenancePage() {
       {/* Delete Confirm */}
       <AlertDialog
         open={!!deleteId}
-        onOpenChange={(open) => !open && setDeleteId(null)}
+        onOpenChange={(o) => !o && setDeleteId(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1263,7 +1272,14 @@ export default function MaintenancePage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete} type="button">
+            <AlertDialogAction
+              onClick={() => deleteId && deleteMutation.mutate(deleteId)}
+              type="button"
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

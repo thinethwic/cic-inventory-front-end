@@ -64,22 +64,58 @@ import { cn } from "@/lib/utils";
 type TransferType = "employee" | "location" | "both";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function getStatusBadgeVariant(status: string) {
-  switch (status) {
-    case "Available":
-      return "secondary";
-    case "Assigned":
-      return "default";
-    case "In Repair":
-      return "outline";
-    case "Damaged":
-      return "outline";
-    case "Disposed":
-    case "Retired":
-      return "destructive";
+
+/**
+ * Normalize status string to Title Case for display.
+ * Handles UPPERCASE values returned from the API (e.g. "ASSIGNED" → "Assigned").
+ */
+function normalizeStatus(status: string): string {
+  if (!status) return "";
+  return status
+    .toLowerCase()
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * Returns Tailwind classNames for distinct per-status badge colors.
+ * Uses .toLowerCase() so "ASSIGNED", "Assigned", and "assigned" all match.
+ */
+function getStatusBadgeClass(status: string): string {
+  switch (status.toLowerCase()) {
+    case "available":
+      return "border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800";
+    case "assigned":
+      return "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-800";
+    case "in repair":
+      return "border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800";
+    case "damaged":
+      return "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400 dark:border-red-800";
+    case "disposed":
+    case "retired":
+      return "border-zinc-400 bg-zinc-100 text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-700";
     default:
-      return "outline";
+      return "";
   }
+}
+
+/** Reusable status badge with correct color + normalized label. */
+function StatusBadge({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(getStatusBadgeClass(status), className)}
+    >
+      {normalizeStatus(status)}
+    </Badge>
+  );
 }
 
 function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
@@ -117,7 +153,6 @@ function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
   return raw || fallback;
 }
 
-// ── Extract name string from object or plain string ───────────────────────────
 function extractName(raw: unknown): string | null {
   if (raw == null) return null;
   if (typeof raw === "object" && "name" in (raw as object)) {
@@ -127,7 +162,6 @@ function extractName(raw: unknown): string | null {
   return null;
 }
 
-// ── Build asset payload ───────────────────────────────────────────────────────
 function buildAssetPayload(args: {
   asset: Asset;
   transferType: TransferType;
@@ -310,12 +344,11 @@ function AssetCombobox({
                       <span className="truncate text-muted-foreground">
                         {a.brand} {a.model}
                       </span>
-                      <Badge
-                        variant={getStatusBadgeVariant(a.status)}
+                      {/* ✅ Fixed: distinct per-status colors + normalized casing */}
+                      <StatusBadge
+                        status={a.status}
                         className="ml-auto shrink-0 text-xs"
-                      >
-                        {a.status}
-                      </Badge>
+                      />
                     </div>
                     <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
                       {a.serialNo && (
@@ -748,7 +781,6 @@ export default function AssetTransferPage() {
       setError("Please select a transfer date.");
       return;
     }
-
     if (
       (transferType === "employee" || transferType === "both") &&
       !newEmployeeId
@@ -763,8 +795,6 @@ export default function AssetTransferPage() {
       setError("Please select a new location.");
       return;
     }
-
-    // Same-employee check
     if (transferType === "employee" || transferType === "both") {
       if (
         selectedAsset.assignedToId &&
@@ -774,8 +804,6 @@ export default function AssetTransferPage() {
         return;
       }
     }
-
-    // Same-location check
     if (transferType === "location" || transferType === "both") {
       if (
         selectedAsset.locationId &&
@@ -802,18 +830,12 @@ export default function AssetTransferPage() {
       const isLocationTransfer =
         transferType === "location" || transferType === "both";
 
-      // ── Resolve previous employee id ──────────────────────────────────────
-      // asset.assignedToId is now correctly populated from AssetResponseDTO
       const resolvePrevEmployeeId = (): number | null => {
         if (!isEmployeeTransfer) return null;
-
-        // Shape 1 — flat assignedToId (correctly populated from AssetResponseDTO)
         if (selectedAsset.assignedToId) {
           const parsed = parseInt(String(selectedAsset.assignedToId), 10);
           if (!isNaN(parsed)) return parsed;
         }
-
-        // Shape 2 — nested object { id, name } (defensive fallback)
         const assignedToRaw = selectedAsset.assignedTo as unknown;
         if (
           assignedToRaw &&
@@ -826,8 +848,6 @@ export default function AssetTransferPage() {
           );
           if (!isNaN(parsed)) return parsed;
         }
-
-        // Shape 3 — name string "EMP001 - John", look up in employees list
         const nameStr =
           typeof assignedToRaw === "string" ? assignedToRaw : null;
         if (nameStr) {
@@ -842,21 +862,15 @@ export default function AssetTransferPage() {
           );
           if (match) return Number(match.id);
         }
-
         return null;
       };
 
-      // ── Resolve previous location id ──────────────────────────────────────
       const resolvePrevLocationId = (): number | null => {
         if (!isLocationTransfer) return null;
-
-        // Shape 1 — flat locationId (correctly populated from AssetResponseDTO)
         if (selectedAsset.locationId) {
           const parsed = parseInt(String(selectedAsset.locationId), 10);
           if (!isNaN(parsed)) return parsed;
         }
-
-        // Shape 2 — nested object { id, name } (defensive fallback)
         const locationRaw = selectedAsset.location as unknown;
         if (
           locationRaw &&
@@ -869,8 +883,6 @@ export default function AssetTransferPage() {
           );
           if (!isNaN(parsed)) return parsed;
         }
-
-        // Shape 3 — name string, look up in locations list
         const nameStr = typeof locationRaw === "string" ? locationRaw : null;
         if (nameStr) {
           const match = locations.find(
@@ -879,14 +891,12 @@ export default function AssetTransferPage() {
           );
           if (match) return Number(match.id);
         }
-
         return null;
       };
 
       const prevEmployeeNumericId = resolvePrevEmployeeId();
       const prevLocationNumericId = resolvePrevLocationId();
 
-      // ── Step 1: Update the asset record ───────────────────────────────────
       const assetPayload = buildAssetPayload({
         asset: selectedAsset,
         transferType,
@@ -899,7 +909,6 @@ export default function AssetTransferPage() {
         assetPayload,
       );
 
-      // ── Step 2: Create the audit transfer record ───────────────────────────
       const dto: AssetTransferDTO = {
         assetId: { id: numericAssetId },
         TransferType: transferType,
@@ -1155,13 +1164,8 @@ export default function AssetTransferPage() {
                         <Package className="mt-0.5 h-4 w-4 text-muted-foreground" />
                         <div>
                           <p className="font-medium">Status</p>
-                          <Badge
-                            variant={getStatusBadgeVariant(
-                              selectedAsset.status,
-                            )}
-                          >
-                            {selectedAsset.status}
-                          </Badge>
+                          {/* ✅ Fixed: distinct per-status colors + normalized casing */}
+                          <StatusBadge status={selectedAsset.status} />
                         </div>
                       </div>
                       <div className="flex items-start gap-2">

@@ -8,26 +8,19 @@ import type {
     MaintenanceStatus,
     MaintenancePriority,
 } from "@/types";
+import type { SpringPage } from "@/lib/asset-transfer-api";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const BASE_URL =
+    import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_BASE = `${BASE_URL}/api/v1`;
 const JWT_TEMPLATE = "cic-inventory";
-
-// ─── Spring Page wrapper ──────────────────────────────────────────────────────
-export type SpringPage<T> = {
-    content: T[];
-    totalElements: number;
-    totalPages: number;
-    number: number;
-    size: number;
-};
 
 // ─── Core fetch helper ────────────────────────────────────────────────────────
 async function apiFetch<T>(
     token: string,
     endpoint: string,
-    init: RequestInit = {}
+    init: RequestInit = {},
 ): Promise<T> {
     const url = `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
@@ -44,7 +37,7 @@ async function apiFetch<T>(
         });
     } catch (networkErr) {
         throw new Error(
-            `Network error — is the backend running? (${String(networkErr)})`
+            `Network error — is the backend running? (${String(networkErr)})`,
         );
     }
 
@@ -73,52 +66,15 @@ function reqBody(payload: unknown): RequestInit {
     return { body: JSON.stringify(payload) };
 }
 
-// ─── Explicit status map ──────────────────────────────────────────────────────
+// ─── Status maps ──────────────────────────────────────────────────────────────
 const STATUS_TO_BACKEND: Record<string, string> = {
-    "Open": "OPEN",
+    Open: "OPEN",
     "In Progress": "IN_PROGRESS",
-    "Completed": "COMPLETED",
-    "Cancelled": "CANCELLED",
+    Completed: "COMPLETED",
+    Cancelled: "CANCELLED",
     "Cannot Repair": "CANNOT_REPAIR",
 };
 
-// ─── Frontend → Backend DTO ───────────────────────────────────────────────────
-// Matches backend DTO exactly:
-//   ticketNo      @NotBlank  — omitted on create (auto-generated), included on update
-//   assetId       @NotNull
-//   issueTitle    nullable string
-//   description   nullable string
-//   priority      @NotNull enum
-//   status        @NotNull enum
-//   reportedDate  @NotNull LocalDate
-//   dueDate       nullable LocalDate
-//   assignedTo    nullable string
-//   cost          nullable BigDecimal
-//   notes         nullable string
-function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
-    const payload: Record<string, unknown> = {
-        assetId: Number(dto.assetId),
-        issueTitle: dto.issueTitle?.trim() || null,
-        description: dto.description?.trim() || null,
-        priority: dto.priority?.toUpperCase(),
-        status: STATUS_TO_BACKEND[dto.status] ?? dto.status?.toUpperCase().replace(/\s+/g, "_"),
-        reportedDate: dto.reportedDate,
-        dueDate: dto.dueDate || null,
-        assignedTo: dto.assignedTo?.trim() || null,
-        cost: dto.cost ?? null,
-        notes: dto.notes?.trim() || null,
-    };
-
-    // ticketNo is @NotBlank — only include on update (when it already exists)
-    // On create the backend auto-generates it so we omit it entirely
-    if (dto.ticketNo?.trim()) {
-        payload.ticketNo = dto.ticketNo.trim();
-    }
-
-    return payload;
-}
-
-// ─── Backend → Frontend ───────────────────────────────────────────────────────
 const STATUS_MAP: Record<string, MaintenanceStatus> = {
     OPEN: "Open",
     IN_PROGRESS: "In Progress",
@@ -134,6 +90,31 @@ const PRIORITY_MAP: Record<string, MaintenancePriority> = {
     CRITICAL: "Critical",
 };
 
+// ─── Frontend → Backend DTO ───────────────────────────────────────────────────
+function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+        assetId: Number(dto.assetId),
+        issueTitle: dto.issueTitle?.trim() || null,
+        description: dto.description?.trim() || null,
+        priority: dto.priority?.toUpperCase(),
+        status:
+            STATUS_TO_BACKEND[dto.status] ??
+            dto.status?.toUpperCase().replace(/\s+/g, "_"),
+        reportedDate: dto.reportedDate,
+        dueDate: dto.dueDate || null,
+        assignedTo: dto.assignedTo?.trim() || null,
+        cost: dto.cost ?? null,
+        notes: dto.notes?.trim() || null,
+    };
+
+    if (dto.ticketNo?.trim()) {
+        payload.ticketNo = dto.ticketNo.trim();
+    }
+
+    return payload;
+}
+
+// ─── Backend → Frontend ───────────────────────────────────────────────────────
 function fromBackendRow(raw: Record<string, unknown>): Maintenance {
     const asset = raw.asset as Record<string, unknown> | undefined;
     const supplier = raw.supplier as Record<string, unknown> | undefined;
@@ -141,14 +122,17 @@ function fromBackendRow(raw: Record<string, unknown>): Maintenance {
     return {
         id: String(raw.id),
         ticketNo: (raw.ticketNo as string) ?? "",
-        assetId: asset?.id != null ? String(asset.id) : String(raw.assetId ?? ""),
+        assetId:
+            asset?.id != null ? String(asset.id) : String(raw.assetId ?? ""),
         assetCode: (asset?.assetCode as string) ?? "",
         supplierId: supplier?.id != null ? String(supplier.id) : undefined,
         supplierName: (supplier?.name as string) ?? undefined,
         issueTitle: (raw.issueTitle as string) ?? "",
         description: (raw.description as string) ?? "",
-        priority: (PRIORITY_MAP[raw.priority as string] ?? raw.priority) as MaintenancePriority,
-        status: (STATUS_MAP[raw.status as string] ?? raw.status) as MaintenanceStatus,
+        priority: (PRIORITY_MAP[raw.priority as string] ??
+            raw.priority) as MaintenancePriority,
+        status: (STATUS_MAP[raw.status as string] ??
+            raw.status) as MaintenanceStatus,
         reportedDate: (raw.reportedDate as string) ?? "",
         dueDate: (raw.dueDate as string) ?? "",
         assignedTo: (raw.assignedTo as string) ?? "",
@@ -158,21 +142,170 @@ function fromBackendRow(raw: Record<string, unknown>): Maintenance {
 }
 
 function fromBackendPage(
-    page: SpringPage<Record<string, unknown>>
+    page: SpringPage<Record<string, unknown>>,
 ): SpringPage<Maintenance> {
     return { ...page, content: page.content.map(fromBackendRow) };
 }
 
-// ─── Supplier mapper ──────────────────────────────────────────────────────────
 function fromBackendSupplier(raw: Record<string, unknown>): Supplier {
     return {
         id: Number(raw.id),
         name: (raw.name ?? raw.supplierName ?? raw.companyName ?? "") as string,
-        contactPerson: (raw.contactPerson ?? raw.contact ?? undefined) as string | undefined,
+        contactPerson: (raw.contactPerson ?? raw.contact ?? undefined) as
+            | string
+            | undefined,
     };
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ─── Auth helper ──────────────────────────────────────────────────────────────
+type GetTokenFn = (opts?: { template?: string }) => Promise<string | null>;
+
+async function getAuthedToken(getToken: GetTokenFn): Promise<string> {
+    const token = await getToken({ template: JWT_TEMPLATE });
+    if (!token) throw new Error("Not authenticated");
+    return token;
+}
+
+// ─── Standalone fetchers (React Query compatible) ─────────────────────────────
+// These are plain async functions — easy to use in queryFn without hooks.
+
+/** Fetch one page of maintenance tickets — server-side paginated. */
+export async function fetchMaintenancePage(
+    getToken: GetTokenFn,
+    page = 0,
+    size = 25,
+    search = "",
+    status = "",
+    priority = "",
+): Promise<SpringPage<Maintenance>> {
+    const token = await getAuthedToken(getToken);
+    const qs = new URLSearchParams({
+        page: String(page),
+        size: String(size),
+        sort: "id,desc",
+    });
+    if (search.trim()) qs.set("search", search.trim());
+    if (status && status !== "All")
+        qs.set("status", STATUS_TO_BACKEND[status] ?? status);
+    if (priority && priority !== "All") qs.set("priority", priority.toUpperCase());
+
+    const raw = await apiFetch<SpringPage<Record<string, unknown>>>(
+        token,
+        `/maintenances?${qs}`,
+    );
+    return fromBackendPage(raw);
+}
+
+/** Fetch all assets for combobox — loops pages so nothing is missed. */
+export async function fetchAllAssetsForMaintenance(
+    getToken: GetTokenFn,
+): Promise<Asset[]> {
+    const token = await getAuthedToken(getToken);
+    let page = 0;
+    const size = 500;
+    let all: Asset[] = [];
+
+    while (true) {
+        const result = await apiFetch<SpringPage<Asset>>(
+            token,
+            `/assets?page=${page}&size=${size}&sort=id,asc`,
+        );
+        all = all.concat(result.content);
+        if (page + 1 >= result.totalPages) break;
+        page++;
+    }
+
+    return all;
+}
+
+/** Search assets by query string — for search-as-you-type in combobox. */
+export async function searchAssetsForMaintenance(
+    getToken: GetTokenFn,
+    search: string,
+    size = 50,
+): Promise<Asset[]> {
+    const token = await getAuthedToken(getToken);
+    const qs = new URLSearchParams({ page: "0", size: String(size) });
+    if (search.trim()) qs.set("search", search.trim());
+    const result = await apiFetch<SpringPage<Asset>>(token, `/assets?${qs}`);
+    return result.content ?? [];
+}
+
+/** Fetch all suppliers for combobox — loops pages so nothing is missed. */
+export async function fetchAllSuppliers(
+    getToken: GetTokenFn,
+): Promise<Supplier[]> {
+    const token = await getAuthedToken(getToken);
+    let page = 0;
+    const size = 500;
+    let all: Supplier[] = [];
+
+    while (true) {
+        const result = await apiFetch<SpringPage<Record<string, unknown>>>(
+            token,
+            `/suppliers?page=${page}&size=${size}&sort=name,asc`,
+        );
+        all = all.concat(result.content.map(fromBackendSupplier));
+        if (page + 1 >= result.totalPages) break;
+        page++;
+    }
+
+    return all;
+}
+
+// ─── Mutation helpers (plain async — use in useMutation) ─────────────────────
+export async function createMaintenance(
+    getToken: GetTokenFn,
+    dto: MaintenanceFormState,
+): Promise<Maintenance> {
+    const token = await getAuthedToken(getToken);
+    const raw = await apiFetch<Record<string, unknown>>(token, "/maintenances", {
+        method: "POST",
+        ...reqBody(toBackendDto(dto)),
+    });
+    return fromBackendRow(raw);
+}
+
+export async function updateMaintenance(
+    getToken: GetTokenFn,
+    id: string,
+    dto: MaintenanceFormState,
+): Promise<Maintenance> {
+    const token = await getAuthedToken(getToken);
+    const raw = await apiFetch<Record<string, unknown>>(
+        token,
+        `/maintenances/${id}`,
+        { method: "PUT", ...reqBody(toBackendDto(dto)) },
+    );
+    return fromBackendRow(raw);
+}
+
+export async function deleteMaintenance(
+    getToken: GetTokenFn,
+    id: string,
+): Promise<void> {
+    const token = await getAuthedToken(getToken);
+    await apiFetch<void>(token, `/maintenances/${id}`, { method: "DELETE" });
+}
+
+export async function markMaintenanceCompleted(
+    getToken: GetTokenFn,
+    id: string,
+    existing: Maintenance,
+): Promise<Maintenance> {
+    const token = await getAuthedToken(getToken);
+    const raw = await apiFetch<Record<string, unknown>>(
+        token,
+        `/maintenances/${id}`,
+        {
+            method: "PUT",
+            ...reqBody(toBackendDto({ ...existing, status: "Completed" })),
+        },
+    );
+    return fromBackendRow(raw);
+}
+
+// ─── Hook (kept for backward compatibility) ───────────────────────────────────
 export function useMaintenanceApi() {
     const { getToken } = useAuth();
 
@@ -182,89 +315,71 @@ export function useMaintenanceApi() {
             if (!token) throw new Error("Not authenticated");
             return fn(token);
         },
-        [getToken]
+        [getToken],
     );
 
-    // GET all tickets
     const getAll = React.useCallback(
-        (page = 0, size = 100) =>
+        (page = 0, size = 25) =>
             withToken((t) =>
                 apiFetch<SpringPage<Record<string, unknown>>>(
                     t,
-                    `/maintenances?page=${page}&size=${size}&sort=id,desc`
-                ).then(fromBackendPage)
+                    `/maintenances?page=${page}&size=${size}&sort=id,desc`,
+                ).then(fromBackendPage),
             ),
-        [withToken]
+        [withToken],
     );
 
-    // POST — ticketNo omitted, backend auto-generates it
     const create = React.useCallback(
-        (dto: MaintenanceFormState) =>
-            withToken((t) =>
-                apiFetch<Record<string, unknown>>(t, "/maintenances", {
-                    method: "POST",
-                    ...reqBody(toBackendDto(dto)),
-                }).then(fromBackendRow)
-            ),
-        [withToken]
+        (dto: MaintenanceFormState) => createMaintenance(getToken, dto),
+        [getToken],
     );
 
-    // PUT — ticketNo included (satisfies @NotBlank)
     const update = React.useCallback(
         (id: string, dto: MaintenanceFormState) =>
-            withToken((t) =>
-                apiFetch<Record<string, unknown>>(t, `/maintenances/${id}`, {
-                    method: "PUT",
-                    ...reqBody(toBackendDto(dto)),
-                }).then(fromBackendRow)
-            ),
-        [withToken]
+            updateMaintenance(getToken, id, dto),
+        [getToken],
     );
 
-    // DELETE
     const remove = React.useCallback(
-        (id: string) =>
-            withToken((t) =>
-                apiFetch<void>(t, `/maintenances/${id}`, { method: "DELETE" })
-            ),
-        [withToken]
+        (id: string) => deleteMaintenance(getToken, id),
+        [getToken],
     );
 
-    // PUT with status = Completed — ticketNo carried from existing record
     const markCompleted = React.useCallback(
         (id: string, existing: Maintenance) =>
-            withToken((t) =>
-                apiFetch<Record<string, unknown>>(t, `/maintenances/${id}`, {
-                    method: "PUT",
-                    ...reqBody(toBackendDto({ ...existing, status: "Completed" })),
-                }).then(fromBackendRow)
-            ),
-        [withToken]
+            markMaintenanceCompleted(getToken, id, existing),
+        [getToken],
     );
 
-    // GET assets for combobox
     const getAssets = React.useCallback(
-        (page = 0, size = 200) =>
-            withToken((t) =>
-                apiFetch<SpringPage<Asset>>(t, `/assets?page=${page}&size=${size}`)
-            ),
-        [withToken]
+        () => fetchAllAssetsForMaintenance(getToken).then((content) => ({
+            content,
+            totalElements: content.length,
+            totalPages: 1,
+            number: 0,
+            size: content.length,
+        })),
+        [getToken],
     );
 
-    // GET suppliers for combobox
     const getSuppliers = React.useCallback(
-        (page = 0, size = 200) =>
-            withToken((t) =>
-                apiFetch<SpringPage<Record<string, unknown>>>(
-                    t,
-                    `/suppliers?page=${page}&size=${size}&sort=name,asc`
-                ).then((p) => ({
-                    ...p,
-                    content: p.content.map(fromBackendSupplier),
-                }))
-            ),
-        [withToken]
+        () => fetchAllSuppliers(getToken).then((content) => ({
+            content,
+            totalElements: content.length,
+            totalPages: 1,
+            number: 0,
+            size: content.length,
+        })),
+        [getToken],
     );
 
-    return { getAll, create, update, remove, markCompleted, getAssets, getSuppliers };
+    return {
+        getAll,
+        create,
+        update,
+        remove,
+        markCompleted,
+        getAssets,
+        getSuppliers,
+    };
 }

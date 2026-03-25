@@ -1,6 +1,7 @@
 // src/lib/asset-transfer-api.ts
 import { useAuth } from "@clerk/clerk-react";
 import * as React from "react";
+import type { Asset, Employee, Location } from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_BASE = `${BASE_URL}/api/v1`;
@@ -48,7 +49,6 @@ export type AssetTransferResponse = {
         location?: string;
         locationId?: string;
     };
-    // ── Audit trail — these match the backend JSON field names exactly ────────
     fromEmployee: TransferEmployee | null;
     toEmployee: TransferEmployee | null;
     fromLocation: TransferLocation | null;
@@ -57,17 +57,16 @@ export type AssetTransferResponse = {
     updatedAt: string;
 };
 
-// ─── Ref wrappers (match backend inner DTO classes) ───────────────────────────
+// ─── Ref wrappers ─────────────────────────────────────────────────────────────
 type EmployeeRef = { id: number };
 type LocationRef = { id: number };
 
 // ─── Request DTO ──────────────────────────────────────────────────────────────
 export type AssetTransferDTO = {
     assetId: { id: number };
-    TransferType: "employee" | "location" | "both"; // capital T — matches backend field
-    TransferDate: string;                            // capital T — "YYYY-MM-DD"
-    reason: string;                            // @NotNull — never undefined/null
-    // ── From / To refs (nullable — only set when that type is involved) ───────
+    TransferType: "employee" | "location" | "both";
+    TransferDate: string;
+    reason: string;
     fromEmployeeId: EmployeeRef | null;
     toEmployeeId: EmployeeRef | null;
     fromLocationId: LocationRef | null;
@@ -75,9 +74,9 @@ export type AssetTransferDTO = {
 };
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
-type GetTokenFn = (params?: { template?: string }) => Promise<string | null>;
+export type GetTokenFn = (params?: { template?: string }) => Promise<string | null>;
 
-async function withToken<T>(
+export async function withToken<T>(
     getToken: GetTokenFn,
     fn: (token: string) => Promise<T>,
 ): Promise<T> {
@@ -87,7 +86,7 @@ async function withToken<T>(
 }
 
 // ─── Core fetch helper ────────────────────────────────────────────────────────
-async function apiFetch<T>(
+export async function apiFetch<T>(
     token: string,
     endpoint: string,
     init: RequestInit = {},
@@ -117,12 +116,10 @@ async function apiFetch<T>(
     if (!res.ok) {
         if (isJson) {
             const body = await res.json().catch(() => ({}));
-            console.error("[apiFetch] Error body:", JSON.stringify(body, null, 2));
             const msg = body?.message ?? body?.error ?? `HTTP ${res.status}`;
             throw new Error(msg);
         }
         const text = await res.text().catch(() => "");
-        console.error("[apiFetch] Non-JSON error:", text);
         throw new Error(`API ${res.status}: ${text || "Non-JSON response"}`);
     }
 
@@ -130,11 +127,96 @@ async function apiFetch<T>(
     return res.json() as Promise<T>;
 }
 
-// ─── Fetch all transfers — sorted newest first ────────────────────────────────
+// ─── Fetch all pages helper ───────────────────────────────────────────────────
+// Used for lookup comboboxes (employees, locations, assets).
+// Uses a large page size to minimise round-trips; loops until all pages loaded.
+export async function fetchAllPages<T>(
+    getToken: GetTokenFn,
+    endpoint: string,   // e.g. "/assets", "/employees", "/locations"
+    size = 500,
+    extraParams = "",
+): Promise<T[]> {
+    return withToken(getToken, async (token) => {
+        let page = 0;
+        let all: T[] = [];
+
+        while (true) {
+            const sep = endpoint.includes("?") ? "&" : "?";
+            const result = await apiFetch<SpringPage<T>>(
+                token,
+                `${endpoint}${sep}page=${page}&size=${size}&sort=id,asc${extraParams}`,
+            );
+            all = all.concat(result.content);
+            if (page + 1 >= result.totalPages) break;
+            page++;
+        }
+
+        return all;
+    });
+}
+
+// ─── Search helpers (search-as-you-type) ─────────────────────────────────────
+// These hit backend search params so we only load what's needed.
+
+export async function searchAssets(
+    getToken: GetTokenFn,
+    search: string,
+    size = 50,
+): Promise<Asset[]> {
+    return withToken(getToken, async (token) => {
+        const qs = new URLSearchParams({
+            page: "0",
+            size: String(size),
+            ...(search.trim() ? { search: search.trim() } : {}),
+        });
+        const result = await apiFetch<SpringPage<Asset>>(token, `/assets?${qs}`);
+        return result.content ?? [];
+    });
+}
+
+export async function searchEmployees(
+    getToken: GetTokenFn,
+    search: string,
+    size = 50,
+): Promise<Employee[]> {
+    return withToken(getToken, async (token) => {
+        const qs = new URLSearchParams({
+            page: "0",
+            size: String(size),
+            ...(search.trim() ? { search: search.trim() } : {}),
+        });
+        const result = await apiFetch<SpringPage<Employee>>(
+            token,
+            `/employees?${qs}`,
+        );
+        return result.content ?? [];
+    });
+}
+
+export async function searchLocations(
+    getToken: GetTokenFn,
+    search: string,
+    size = 50,
+): Promise<Location[]> {
+    return withToken(getToken, async (token) => {
+        const qs = new URLSearchParams({
+            page: "0",
+            size: String(size),
+            ...(search.trim() ? { search: search.trim() } : {}),
+        });
+        const result = await apiFetch<SpringPage<Location>>(
+            token,
+            `/locations?${qs}`,
+        );
+        return result.content ?? [];
+    });
+}
+
+// ─── Transfer CRUD ────────────────────────────────────────────────────────────
 export async function fetchAssetTransfers(
     getToken: GetTokenFn,
     page = 0,
-    size = 20,
+    size = 25,
 ): Promise<SpringPage<AssetTransferResponse>> {
     return withToken(getToken, (token) =>
         apiFetch<SpringPage<AssetTransferResponse>>(
@@ -144,7 +226,6 @@ export async function fetchAssetTransfers(
     );
 }
 
-// ─── Create transfer ──────────────────────────────────────────────────────────
 export async function createAssetTransfer(
     getToken: GetTokenFn,
     dto: AssetTransferDTO,
@@ -166,7 +247,6 @@ export async function createAssetTransfer(
     );
 }
 
-// ─── Update transfer ──────────────────────────────────────────────────────────
 export async function updateAssetTransfer(
     getToken: GetTokenFn,
     id: number,
@@ -185,7 +265,6 @@ export async function updateAssetTransfer(
     );
 }
 
-// ─── Delete transfer ──────────────────────────────────────────────────────────
 export async function deleteAssetTransfer(
     getToken: GetTokenFn,
     id: number,
@@ -200,7 +279,7 @@ export function useAssetTransferApi() {
     const { getToken } = useAuth();
 
     const getAll = React.useCallback(
-        (page = 0, size = 20) => fetchAssetTransfers(getToken, page, size),
+        (page = 0, size = 25) => fetchAssetTransfers(getToken, page, size),
         [getToken],
     );
     const create = React.useCallback(
@@ -208,7 +287,8 @@ export function useAssetTransferApi() {
         [getToken],
     );
     const update = React.useCallback(
-        (id: number, dto: AssetTransferDTO) => updateAssetTransfer(getToken, id, dto),
+        (id: number, dto: AssetTransferDTO) =>
+            updateAssetTransfer(getToken, id, dto),
         [getToken],
     );
     const remove = React.useCallback(
@@ -216,5 +296,27 @@ export function useAssetTransferApi() {
         [getToken],
     );
 
-    return { getAll, create, update, remove };
+    // Lookup helpers exposed from hook for convenience
+    const getAllAssets = React.useCallback(
+        () => fetchAllPages(getToken, "/assets"),
+        [getToken],
+    );
+    const getAllEmployees = React.useCallback(
+        () => fetchAllPages(getToken, "/employees"),
+        [getToken],
+    );
+    const getAllLocations = React.useCallback(
+        () => fetchAllPages(getToken, "/locations"),
+        [getToken],
+    );
+
+    return {
+        getAll,
+        create,
+        update,
+        remove,
+        getAllAssets,
+        getAllEmployees,
+        getAllLocations,
+    };
 }
