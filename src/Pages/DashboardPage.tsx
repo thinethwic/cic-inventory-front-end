@@ -7,6 +7,7 @@ import {
   Wrench,
   ShieldCheck,
   ArrowUpRight,
+  Eye,
   QrCode,
   FileDown,
   Loader2,
@@ -45,6 +46,9 @@ import type { Asset } from "@/types";
 import type { Maintenance } from "@/types";
 import type { AssetTransferResponse } from "@/lib/asset-transfer-api";
 
+import { hasRole } from "@/utils/permissions";
+import { usePermissions } from "@/hooks/usePermissions";
+
 // ─── Unified Activity type ────────────────────────────────────────────────────
 type ActivityStatus = "Success" | "Pending" | "In Progress" | "Cancelled";
 
@@ -52,6 +56,7 @@ type Activity = {
   id: string;
   action: string;
   assetCode: string;
+  location: string; // ← ADDED: carries the real location
   detail: string;
   time: string;
   rawDate: Date;
@@ -60,12 +65,22 @@ type Activity = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function parseDate(value: string | number | undefined | null): Date {
+  if (!value) return new Date(0);
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? new Date(0) : d;
+}
+
 function formatTime(date: Date): string {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMs < 0) return date.toLocaleDateString();
+
+  const diffMins = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
 
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins}m ago`;
@@ -83,13 +98,16 @@ function transferToActivity(t: AssetTransferResponse): Activity {
         ? "Location Transfer"
         : "Employee + Location Transfer";
 
+  const rawDate = parseDate(t.createdAt);
+
   return {
     id: `transfer-${t.id}`,
     action: typeLabel,
     assetCode: t.asset.assetCode,
+    location: "—",
     detail: t.reason || `${t.asset.brand} ${t.asset.model}`,
-    time: formatTime(new Date(t.createdAt)),
-    rawDate: new Date(t.createdAt),
+    time: formatTime(rawDate),
+    rawDate,
     status: "Success",
     icon: "transfer",
   };
@@ -105,13 +123,19 @@ function maintenanceToActivity(m: Maintenance): Activity {
           ? "In Progress"
           : "Pending";
 
+  const rawDate = parseDate(m.createdAt ?? m.reportedDate);
+
+  // ← Cast to access location which may not be in the base Maintenance type
+  const mExt = m as Maintenance & { location?: string };
+
   return {
     id: `maintenance-${m.id}`,
     action: "Maintenance Ticket",
     assetCode: m.assetCode,
+    location: mExt.location ?? "—", // ← FIXED: use actual maintenance location
     detail: m.issueTitle,
-    time: formatTime(new Date(m.reportedDate)),
-    rawDate: new Date(m.reportedDate),
+    time: formatTime(rawDate),
+    rawDate,
     status,
     icon: "maintenance",
   };
@@ -171,6 +195,9 @@ export default function DashboardPage() {
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { getAll: getAllMaintenance } = useMaintenanceApi();
 
+  const { role } = usePermissions();
+  const isAdmin = hasRole(role, ["admin", "admin_user"]);
+
   const [assets, setAssets] = React.useState<Asset[]>([]);
   const [activity, setActivity] = React.useState<Activity[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -179,6 +206,13 @@ export default function DashboardPage() {
   const [activityPage, setActivityPage] = React.useState(1);
   const [activityPageSize, setActivityPageSize] = React.useState(5);
 
+  const [now, setNow] = React.useState(() => new Date());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Fetch assets ───────────────────────────────────────────────────────────
   React.useEffect(() => {
     let cancelled = false;
     if (!isLoaded) return;
@@ -208,6 +242,7 @@ export default function DashboardPage() {
     };
   }, [isLoaded, isSignedIn, getToken]);
 
+  // ── Fetch activity ─────────────────────────────────────────────────────────
   React.useEffect(() => {
     let cancelled = false;
     if (!isLoaded || !isSignedIn) return;
@@ -216,15 +251,18 @@ export default function DashboardPage() {
       setActivityLoading(true);
       try {
         const [transferPage, maintenancePage] = await Promise.all([
-          fetchAssetTransfers(getToken, 0, 50),
+          isAdmin
+            ? fetchAssetTransfers(getToken, 0, 50)
+            : Promise.resolve(null),
           getAllMaintenance(0, 50),
         ]);
 
         if (cancelled) return;
 
-        const transferActivities = (transferPage?.content ?? []).map(
-          transferToActivity,
-        );
+        const transferActivities = isAdmin
+          ? (transferPage?.content ?? []).map(transferToActivity)
+          : [];
+
         const maintenanceActivities = (maintenancePage?.content ?? []).map(
           maintenanceToActivity,
         );
@@ -247,7 +285,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, isSignedIn, getToken, getAllMaintenance]);
+  }, [isLoaded, isSignedIn, getToken, getAllMaintenance, isAdmin]);
 
   const stats = React.useMemo(() => computeStats(assets), [assets]);
   const warrantyExpiring = React.useMemo(
@@ -269,9 +307,11 @@ export default function DashboardPage() {
 
   const paginatedActivity = React.useMemo(() => {
     const start = (activityPage - 1) * activityPageSize;
-    const end = start + activityPageSize;
-    return activity.slice(start, end);
-  }, [activity, activityPage, activityPageSize]);
+    return activity
+      .slice(start, start + activityPageSize)
+      .map((a) => ({ ...a, time: formatTime(a.rawDate) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity, activityPage, activityPageSize, now]);
 
   const activityFrom =
     activity.length === 0 ? 0 : (activityPage - 1) * activityPageSize + 1;
@@ -304,17 +344,12 @@ export default function DashboardPage() {
       ),
     ].join("\n");
 
-    const blob = new Blob([csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
-
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-
     const today = new Date().toISOString().slice(0, 10);
     link.setAttribute("download", `warranty-expiring-report-${today}.csv`);
-
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -331,6 +366,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* ── KPI Cards ── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map((k) => {
           const Icon = k.icon;
@@ -357,6 +393,7 @@ export default function DashboardPage() {
         })}
       </div>
 
+      {/* ── Quick Actions ── */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Quick Actions</CardTitle>
@@ -364,34 +401,61 @@ export default function DashboardPage() {
         <CardContent className="flex flex-wrap gap-2">
           <Button asChild className="gap-2" type="button">
             <Link to="/assets">
-              <ArrowUpRight className="h-4 w-4" /> Assign Asset
+              {isAdmin ? (
+                <>
+                  <ArrowUpRight className="h-4 w-4" /> Assign Asset
+                </>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4" /> View Assets
+                </>
+              )}
             </Link>
           </Button>
+
           <Button asChild variant="secondary" className="gap-2" type="button">
             <Link to="/maintenance">
               <Wrench className="h-4 w-4" /> Add Maintenance
             </Link>
           </Button>
-          <Button asChild variant="outline" className="gap-2" type="button">
-            <Link to="/assetTransfer">
-              <Repeat className="h-4 w-4" /> Transfer Asset
-            </Link>
-          </Button>
-          <Button variant="outline" className="gap-2" type="button">
-            <QrCode className="h-4 w-4" /> Print QR Labels
-          </Button>
-          <Button asChild variant="outline" className="gap-2" type="button">
-            <Link to="/reports">
-              <FileDown className="h-4 w-4" /> Export Report
-            </Link>
-          </Button>
+
+          {isAdmin && (
+            <Button asChild variant="outline" className="gap-2" type="button">
+              <Link to="/assetTransfer">
+                <Repeat className="h-4 w-4" /> Transfer Asset
+              </Link>
+            </Button>
+          )}
+
+          {isAdmin && (
+            <Button variant="outline" className="gap-2" type="button">
+              <QrCode className="h-4 w-4" />{" "}
+              <Link to="/assets">Print QR Labels</Link>
+            </Button>
+          )}
+
+          {isAdmin && (
+            <Button asChild variant="outline" className="gap-2" type="button">
+              <Link to="/reports">
+                <FileDown className="h-4 w-4" /> Export Report
+              </Link>
+            </Button>
+          )}
         </CardContent>
       </Card>
 
+      {/* ── Activity + Warranty ── */}
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">Recent Activity</CardTitle>
+            <CardTitle className="text-base">
+              Recent Activity
+              {!isAdmin && (
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  (Maintenance only)
+                </span>
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {activityLoading ? (
@@ -409,6 +473,7 @@ export default function DashboardPage() {
                     <TableRow>
                       <TableHead>Type</TableHead>
                       <TableHead>Asset</TableHead>
+                      <TableHead>Location</TableHead>
                       <TableHead>Detail</TableHead>
                       <TableHead>Time</TableHead>
                       <TableHead className="text-right">Status</TableHead>
@@ -431,6 +496,10 @@ export default function DashboardPage() {
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">
                           {a.assetCode}
+                        </TableCell>
+                        {/* ← FIXED: render a.location instead of hardcoded "location" */}
+                        <TableCell className="text-xs text-muted-foreground">
+                          {a.location}
                         </TableCell>
                         <TableCell className="max-w-[200px] truncate text-sm text-muted-foreground">
                           {a.detail}
@@ -514,11 +583,13 @@ export default function DashboardPage() {
 
             <Separator className="my-4" />
             <div className="flex justify-end gap-2">
-              <Button asChild variant="ghost" className="gap-2" type="button">
-                <Link to="/transfers">
-                  View transfers <ArrowUpRight className="h-4 w-4" />
-                </Link>
-              </Button>
+              {isAdmin && (
+                <Button asChild variant="ghost" className="gap-2" type="button">
+                  <Link to="/assetTransfer">
+                    View transfers <ArrowUpRight className="h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
               <Button asChild variant="ghost" className="gap-2" type="button">
                 <Link to="/maintenance">
                   View tickets <ArrowUpRight className="h-4 w-4" />
@@ -528,6 +599,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {/* ── Warranty Expiring ── */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Warranty Expiring</CardTitle>

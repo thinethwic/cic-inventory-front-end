@@ -171,6 +171,8 @@ export type Maintenance = {
     assignedTo?: string;
     cost?: number;
     notes?: string;
+    location?: string;
+    createdAt?: string;
 };
 
 export type MaintenanceFormState = {
@@ -187,6 +189,7 @@ export type MaintenanceFormState = {
     supplierId?: string | number | null;
     cost?: number;
     notes?: string;
+    location?: string;
 };
 
 export const emptyMaintenanceForm: MaintenanceFormState = {
@@ -203,4 +206,5 @@ export const emptyMaintenanceForm: MaintenanceFormState = {
     supplierId: null,
     cost: undefined,
     notes: "",
+    location: "",
 };

@@ -1,5 +1,10 @@
 // src/pages/MaintenancePage.tsx
 import * as React from "react";
+
+import { MaintenanceGatePass } from "@/components/Gatepassprint";
+import { useUser } from "@clerk/clerk-react";
+import { Printer } from "lucide-react";
+
 import {
   useQuery,
   useMutation,
@@ -98,6 +103,9 @@ import {
 } from "@/lib/maintainance-api";
 import { useAssetApi } from "@/lib/api";
 
+import { hasRole } from "@/utils/permissions";
+import { usePermissions } from "@/hooks/usePermissions";
+
 // ─── Query keys ───────────────────────────────────────────────────────────────
 const QK = {
   maintenance: (
@@ -119,9 +127,9 @@ function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
     case "In Progress":
       return "In Repair";
     case "Completed":
-      return "Available";
+      return "Assigned";
     case "Cancelled":
-      return "Available";
+      return "Assigned";
     case "Cannot Repair":
       return "Disposed";
     default:
@@ -484,6 +492,17 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function MaintenancePage() {
+  const { role } = usePermissions();
+  const isAdmin = hasRole(role, ["admin", "admin_user"]);
+
+  const { user } = useUser();
+  const [gpTicket, setGpTicket] = React.useState<Maintenance | null>(null);
+  const userLocation = (user?.publicMetadata?.location as string) ?? "";
+
+  const filteredStatusOptions = isAdmin
+    ? maintenanceStatusOptions
+    : maintenanceStatusOptions.filter((s) => s === "Open");
+
   const { getToken } = useAuth();
   const qc = useQueryClient();
   const { updateStatus: updateAssetStatus } = useAssetApi();
@@ -500,7 +519,6 @@ export default function MaintenancePage() {
     MaintenancePriority | "All"
   >("All");
 
-  // Debounce search input by 400ms to avoid hammering backend
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 400);
     return () => clearTimeout(t);
@@ -510,12 +528,11 @@ export default function MaintenancePage() {
   const [page, setPage] = React.useState(0);
   const [pageSize, setPageSize] = React.useState(25);
 
-  // Reset to page 0 when filters change
   React.useEffect(() => {
     setPage(0);
   }, [debouncedQ, statusFilter, priorityFilter]);
 
-  // ── React Query: maintenance tickets (server-side paginated + filtered) ────
+  // ── React Query ────────────────────────────────────────────────────────────
   const {
     data: maintenancePage,
     isLoading,
@@ -547,14 +564,12 @@ export default function MaintenancePage() {
   const rangeStart = totalElements === 0 ? 0 : page * pageSize + 1;
   const rangeEnd = Math.min((page + 1) * pageSize, totalElements);
 
-  // ── React Query: assets for combobox ──────────────────────────────────────
   const { data: assets = [] } = useQuery({
     queryKey: QK.assets,
     queryFn: () => fetchAllAssetsForMaintenance(getTokenRef.current),
     staleTime: 1000 * 60 * 2,
   });
 
-  // ── React Query: suppliers — only load when form opens ────────────────────
   const [formOpen, setFormOpen] = React.useState(false);
   const { data: suppliers = [], isLoading: suppliersLoading } = useQuery({
     queryKey: QK.suppliers,
@@ -575,6 +590,17 @@ export default function MaintenancePage() {
     null,
   );
 
+  const gpAsset = React.useMemo(
+    () => assets.find((a) => String(a.id) === gpTicket?.assetId),
+    [assets, gpTicket?.assetId],
+  );
+
+  const gpAssetName = React.useMemo(() => {
+    if (!gpAsset) return undefined;
+    const brandModel = `${gpAsset.brand ?? ""} ${gpAsset.model ?? ""}`.trim();
+    return brandModel || gpAsset.assetCode;
+  }, [gpAsset]);
+
   // ── Dialog helpers ─────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
@@ -583,7 +609,8 @@ export default function MaintenancePage() {
     setForm({
       ...emptyMaintenanceForm,
       ticketNo: "",
-      reportedDate: new Date().toISOString().slice(0, 10),
+      reportedDate: new Date().toLocaleDateString("en-CA"),
+      location: userLocation,
     });
     setFormOpen(true);
   };
@@ -605,6 +632,7 @@ export default function MaintenancePage() {
       assignedTo: m.assignedTo ?? "",
       cost: m.cost,
       notes: m.notes ?? "",
+      location: m.location ?? userLocation,
     });
     setFormOpen(true);
   };
@@ -614,7 +642,6 @@ export default function MaintenancePage() {
     setForm((p) => ({ ...p, assetId, assetCode: a?.assetCode ?? "" }));
   };
 
-  // ── Active ticket check ────────────────────────────────────────────────────
   const hasActiveTicket = (assetId: string, excludeId?: string | null) =>
     rows.some(
       (m) =>
@@ -625,7 +652,6 @@ export default function MaintenancePage() {
         m.status !== "Cannot Repair",
     );
 
-  // ── Validate ───────────────────────────────────────────────────────────────
   const validate = (): string | null => {
     if (!form.assetId) return "Asset is required.";
     if (!form.issueTitle.trim()) return "Issue title is required.";
@@ -633,7 +659,7 @@ export default function MaintenancePage() {
     return null;
   };
 
-  // ── Save mutation ──────────────────────────────────────────────────────────
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const saveMutation = useMutation({
     mutationFn: async () => {
       const err = validate();
@@ -662,13 +688,12 @@ export default function MaintenancePage() {
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : "Failed to save ticket.";
-      if (msg === "duplicate") return; // handled by duplicate dialog
+      if (msg === "duplicate") return;
       setFormError(msg);
       toast.error("Save failed", { description: msg });
     },
   });
 
-  // ── Delete mutation ────────────────────────────────────────────────────────
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const existing = rows.find((x) => x.id === id);
@@ -711,7 +736,6 @@ export default function MaintenancePage() {
     onSettled: () => setDeleteId(null),
   });
 
-  // ── Mark completed mutation ────────────────────────────────────────────────
   const completeMutation = useMutation({
     mutationFn: async (id: string) => {
       const existing = rows.find((x) => x.id === id);
@@ -758,8 +782,8 @@ export default function MaintenancePage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <div className="space-y-1 md:col-span-1">
+        <CardContent className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+          <div className="space-y-1 sm:col-span-2 md:col-span-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
               value={q}
@@ -831,6 +855,7 @@ export default function MaintenancePage() {
                   <TableHead>Priority</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Reported</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead>Due</TableHead>
                   <TableHead className="pr-6 text-right">Actions</TableHead>
                 </TableRow>
@@ -838,7 +863,7 @@ export default function MaintenancePage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center">
+                    <TableCell colSpan={9} className="py-10 text-center">
                       <div className="flex items-center justify-center gap-2 text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                       </div>
@@ -847,7 +872,7 @@ export default function MaintenancePage() {
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="py-10 text-center text-muted-foreground"
                     >
                       No maintenance tickets found.
@@ -886,6 +911,9 @@ export default function MaintenancePage() {
                         {m.reportedDate}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
+                        {m.location || "-"}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
                         {m.dueDate || "-"}
                       </TableCell>
                       <TableCell className="pr-6 text-right">
@@ -896,7 +924,8 @@ export default function MaintenancePage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {m.status !== "Completed" &&
+                            {isAdmin &&
+                              m.status !== "Completed" &&
                               m.status !== "Cannot Repair" && (
                                 <DropdownMenuItem
                                   onClick={() => completeMutation.mutate(m.id)}
@@ -905,15 +934,22 @@ export default function MaintenancePage() {
                                   Completed
                                 </DropdownMenuItem>
                               )}
-                            <DropdownMenuItem onClick={() => openEdit(m)}>
-                              <Pencil className="mr-2 h-4 w-4" /> Edit
+                            {isAdmin && (
+                              <DropdownMenuItem onClick={() => openEdit(m)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => setGpTicket(m)}>
+                              <Printer className="mr-2 h-4 w-4" /> Gate Pass
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => setDeleteId(m.id)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => setDeleteId(m.id)}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -931,7 +967,7 @@ export default function MaintenancePage() {
                 ? "No results"
                 : `Showing ${rangeStart}–${rangeEnd} of ${totalElements}`}
             </p>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
                   Rows per page
@@ -1011,28 +1047,46 @@ export default function MaintenancePage() {
         </CardContent>
       </Card>
 
-      {/* Add / Edit Dialog */}
+      {/* ── Add / Edit Dialog ─────────────────────────────────────────────── */}
       <Dialog
         open={formOpen}
         onOpenChange={(o) => {
           if (!saveMutation.isPending) setFormOpen(o);
         }}
       >
-        <DialogContent className="sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
+        {/*
+          Responsive dialog:
+          - Mobile  (<sm): full viewport width, max-height with scroll
+          - Tablet+ (sm+): constrained width, natural height
+        */}
+        <DialogContent className="w-full max-w-lg sm:max-w-2xl p-0 gap-0 overflow-hidden [&>button]:hidden">
+          {/* Sticky header */}
+          <DialogHeader className="border-b px-4 sm:px-6 py-4 flex flex-row items-center justify-between space-y-0 shrink-0">
+            <DialogTitle className="text-base font-semibold">
               {editingId ? "Edit Ticket" : "New Ticket"}
             </DialogTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={() => setFormOpen(false)}
+              type="button"
+              disabled={saveMutation.isPending}
+            >
+              <span className="sr-only">Close</span>✕
+            </Button>
           </DialogHeader>
 
-          {formError && (
-            <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              {formError}
-            </div>
-          )}
+          {/* Scrollable body */}
+          <div className="overflow-y-auto max-h-[70vh] px-4 sm:px-6 py-4 space-y-4">
+            {formError && (
+              <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                {formError}
+              </div>
+            )}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1 md:col-span-2">
+            {/* Ticket No */}
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Ticket No</div>
               <Input
                 value={editingId ? form.ticketNo : "Auto generated by system"}
@@ -1041,7 +1095,8 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1 md:col-span-2">
+            {/* Asset */}
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Asset *</div>
               {editingId ? (
                 <Input value={form.assetCode} disabled readOnly />
@@ -1055,7 +1110,8 @@ export default function MaintenancePage() {
               )}
             </div>
 
-            <div className="space-y-1 md:col-span-2">
+            {/* Issue Title */}
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Issue Title *</div>
               <Input
                 value={form.issueTitle}
@@ -1067,7 +1123,8 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1 md:col-span-2">
+            {/* Description */}
+            <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Description</div>
               <Input
                 value={form.description ?? ""}
@@ -1079,129 +1136,159 @@ export default function MaintenancePage() {
               />
             </div>
 
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Priority</div>
-              <Select
-                value={form.priority}
-                onValueChange={(v) =>
-                  setForm((p) => ({ ...p, priority: v as MaintenancePriority }))
-                }
-                disabled={saveMutation.isPending}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {maintenancePriorityOptions.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Status</div>
-              <Select
-                value={form.status}
-                onValueChange={(v) =>
-                  setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
-                }
-                disabled={saveMutation.isPending}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {maintenanceStatusOptions.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">
-                Reported Date *
-              </div>
-              <Input
-                type="date"
-                value={form.reportedDate}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, reportedDate: e.target.value }))
-                }
-                disabled={saveMutation.isPending}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Due Date</div>
-              <Input
-                type="date"
-                value={form.dueDate ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, dueDate: e.target.value }))
-                }
-                disabled={saveMutation.isPending}
-              />
-            </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground">Assigned To</div>
-                <TechnicianToggle
-                  value={technicianType}
-                  onChange={(t) => {
-                    setTechnicianType(t);
-                    setForm((p) => ({ ...p, assignedTo: "" }));
-                  }}
-                  disabled={saveMutation.isPending}
-                />
-              </div>
-              {technicianType === "supplier" ? (
-                <SupplierCombobox
-                  suppliers={suppliers}
-                  value={form.assignedTo ?? ""}
-                  onChange={(name) =>
-                    setForm((p) => ({ ...p, assignedTo: name }))
+            {/* Priority + Status — side by side on sm+ */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Priority</div>
+                <Select
+                  value={form.priority}
+                  onValueChange={(v) =>
+                    setForm((p) => ({
+                      ...p,
+                      priority: v as MaintenancePriority,
+                    }))
                   }
                   disabled={saveMutation.isPending}
-                  loading={suppliersLoading}
-                />
-              ) : (
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {maintenancePriorityOptions.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Status</div>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) =>
+                    setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
+                  }
+                  disabled={saveMutation.isPending}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredStatusOptions.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Reported Date + Location */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Reported Date *
+                </div>
                 <Input
-                  value={form.assignedTo ?? ""}
+                  type="date"
+                  value={form.reportedDate}
                   onChange={(e) =>
-                    setForm((p) => ({ ...p, assignedTo: e.target.value }))
+                    setForm((p) => ({ ...p, reportedDate: e.target.value }))
                   }
-                  placeholder="Technician name"
                   disabled={saveMutation.isPending}
                 />
-              )}
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Location</div>
+                <Input
+                  value={form.location ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, location: e.target.value }))
+                  }
+                  placeholder="Location"
+                  disabled={saveMutation.isPending || !isAdmin}
+                />
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Cost</div>
-              <Input
-                type="number"
-                value={form.cost ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({
-                    ...p,
-                    cost:
-                      e.target.value === ""
-                        ? undefined
-                        : Number(e.target.value),
-                  }))
-                }
-                placeholder="0"
-                disabled={saveMutation.isPending}
-              />
-            </div>
+            {/* Admin-only fields */}
+            {isAdmin && (
+              <>
+                {/* Due Date */}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Due Date</div>
+                  <Input
+                    type="date"
+                    value={form.dueDate ?? ""}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, dueDate: e.target.value }))
+                    }
+                    disabled={saveMutation.isPending}
+                  />
+                </div>
 
+                {/* Assigned To */}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      Assigned To
+                    </div>
+                    <TechnicianToggle
+                      value={technicianType}
+                      onChange={(t) => {
+                        setTechnicianType(t);
+                        setForm((p) => ({ ...p, assignedTo: "" }));
+                      }}
+                      disabled={saveMutation.isPending}
+                    />
+                  </div>
+                  {technicianType === "supplier" ? (
+                    <SupplierCombobox
+                      suppliers={suppliers}
+                      value={form.assignedTo ?? ""}
+                      onChange={(name) =>
+                        setForm((p) => ({ ...p, assignedTo: name }))
+                      }
+                      disabled={saveMutation.isPending}
+                      loading={suppliersLoading}
+                    />
+                  ) : (
+                    <Input
+                      value={form.assignedTo ?? ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, assignedTo: e.target.value }))
+                      }
+                      placeholder="Technician name"
+                      disabled={saveMutation.isPending}
+                    />
+                  )}
+                </div>
+
+                {/* Cost */}
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Cost</div>
+                  <Input
+                    type="number"
+                    value={form.cost ?? ""}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        cost:
+                          e.target.value === ""
+                            ? undefined
+                            : Number(e.target.value),
+                      }))
+                    }
+                    placeholder="0"
+                    disabled={saveMutation.isPending}
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Notes */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Notes</div>
               <Input
@@ -1215,7 +1302,8 @@ export default function MaintenancePage() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          {/* Sticky footer */}
+          <DialogFooter className="border-t px-4 sm:px-6 py-3 flex flex-row justify-end gap-2 shrink-0">
             <Button
               variant="outline"
               onClick={() => setFormOpen(false)}
@@ -1285,6 +1373,15 @@ export default function MaintenancePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <MaintenanceGatePass
+        maintenance={gpTicket}
+        open={!!gpTicket}
+        onClose={() => setGpTicket(null)}
+        createdBy={user?.fullName ?? "—"}
+        userLocation={userLocation}
+        assetName={gpAssetName}
+      />
     </div>
   );
 }

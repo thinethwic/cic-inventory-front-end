@@ -1,4 +1,3 @@
-// src/components/auth/AdminProtectedRoute.tsx
 import * as React from "react";
 import { useUser } from "@clerk/clerk-react";
 import { motion } from "framer-motion";
@@ -46,10 +45,18 @@ export default function AdminProtectedRoute({ children }: Props) {
     return <AdminRouteLoader />;
   }
 
-  const role = String(user?.publicMetadata?.role ?? "").toLowerCase();
+  const rawRole = user?.publicMetadata?.role;
 
-  if (role !== "admin") {
-    return <Navigate to="/login" />;
+  // Handle both string and array (e.g. ["admin"])
+  const role = (Array.isArray(rawRole) ? rawRole[0] : (rawRole ?? ""))
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  const allowedRoles = ["admin", "admin_user", "user"];
+
+  if (!user || !allowedRoles.includes(role)) {
+    return <Navigate to="/login" replace />;
   }
 
   return <>{children}</>;

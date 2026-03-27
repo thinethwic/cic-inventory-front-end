@@ -105,6 +105,7 @@ function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
         assignedTo: dto.assignedTo?.trim() || null,
         cost: dto.cost ?? null,
         notes: dto.notes?.trim() || null,
+        location: dto.location?.trim() || null,
     };
 
     if (dto.ticketNo?.trim()) {
@@ -138,6 +139,8 @@ function fromBackendRow(raw: Record<string, unknown>): Maintenance {
         assignedTo: (raw.assignedTo as string) ?? "",
         cost: raw.cost as number | undefined,
         notes: (raw.notes as string) ?? "",
+        location: (raw.location as string) ?? "",
+        createdAt: (raw.createdAt as string) ?? undefined, // ← ADD THIS
     };
 }
 

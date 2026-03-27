@@ -2,13 +2,6 @@
 import * as React from "react";
 import { useAuth } from "@clerk/clerk-react";
 import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-  keepPreviousData,
-} from "@tanstack/react-query";
-import { toast } from "sonner";
-import {
   Repeat,
   Search,
   Package,
@@ -16,6 +9,7 @@ import {
   User,
   FileText,
   Loader2,
+  CheckCircle2,
   Check,
   ChevronsUpDown,
   ChevronsRight,
@@ -53,15 +47,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-import { useAssetApi } from "@/lib/api";
+import { useManagementApi } from "@/lib/management-api";
+import { fetchAssets, useAssetApi } from "@/lib/api";
 import {
   fetchAssetTransfers,
   createAssetTransfer,
-  fetchAllPages,
   type AssetTransferResponse,
   type AssetTransferDTO,
-  type GetTokenFn,
 } from "@/lib/asset-transfer-api";
 import type { Asset, AssetFormState, Employee, Location } from "@/types";
 import { cn } from "@/lib/utils";
@@ -69,38 +63,65 @@ import { cn } from "@/lib/utils";
 // ── Types ─────────────────────────────────────────────────────────────────────
 type TransferType = "employee" | "location" | "both";
 
-// ── Query keys ────────────────────────────────────────────────────────────────
-const QK = {
-  assets: ["transfer-assets"] as const,
-  employees: ["transfer-employees"] as const,
-  locations: ["transfer-locations"] as const,
-  transfers: (page: number, size: number) =>
-    ["asset-transfers", page, size] as const,
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getStatusBadgeVariant(status: string) {
   switch (status) {
-    case "available":
+    case "Available":
       return "secondary";
-    case "assigned":
+    case "Assigned":
       return "default";
-    case "in Repair":
+    case "In Repair":
       return "outline";
-    case "damaged":
+    case "Damaged":
       return "outline";
-    case "disposed":
-    case "retired":
+    case "Disposed":
+    case "Retired":
       return "destructive";
     default:
       return "outline";
   }
 }
 
+function getReadableErrorMessage(err: unknown, fallback = "Operation failed.") {
+  if (!(err instanceof Error)) return fallback;
+  const raw = err.message?.trim() || "";
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("foreign key") ||
+    lower.includes("constraint") ||
+    lower.includes("reference") ||
+    lower.includes("child record") ||
+    lower.includes("linked") ||
+    lower.includes("used in another record")
+  )
+    return "This record is linked to other data, so the operation cannot be completed.";
+  if (
+    lower.includes("not found") ||
+    lower.includes("asset not found") ||
+    lower.includes("employee not found") ||
+    lower.includes("location not found")
+  )
+    return raw || "Required data was not found.";
+  if (
+    lower.includes("conflict") ||
+    lower.includes("already exists") ||
+    lower.includes("already assigned")
+  )
+    return raw || "A conflict occurred while processing the request.";
+  if (
+    lower.includes("bad request") ||
+    lower.includes("validation") ||
+    lower.includes("invalid")
+  )
+    return raw || "Invalid data provided.";
+  return raw || fallback;
+}
+
 function extractName(raw: unknown): string | null {
   if (raw == null) return null;
-  if (typeof raw === "object" && "name" in (raw as object))
+  if (typeof raw === "object" && "name" in (raw as object)) {
     return String((raw as { name: unknown }).name) || null;
+  }
   if (typeof raw === "string") return raw || null;
   return null;
 }
@@ -156,7 +177,6 @@ interface AssetComboboxProps {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
-  loading?: boolean;
 }
 
 function AssetCombobox({
@@ -164,7 +184,6 @@ function AssetCombobox({
   value,
   onChange,
   disabled,
-  loading,
 }: AssetComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -205,18 +224,14 @@ function AssetCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          disabled={disabled || loading}
+          disabled={disabled}
           type="button"
           className={cn(
             "w-full justify-between font-normal",
             !selected && "text-muted-foreground",
           )}
         >
-          {loading ? (
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading assets...
-            </span>
-          ) : selected ? (
+          {selected ? (
             <span className="flex items-center gap-2 truncate">
               <span className="font-medium text-foreground">
                 {selected.assetCode}
@@ -334,7 +349,8 @@ interface EmployeeComboboxProps {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
-  loading?: boolean;
+  filteredByLocation?: boolean;
+  locationName?: string;
 }
 
 function EmployeeCombobox({
@@ -342,7 +358,8 @@ function EmployeeCombobox({
   value,
   onChange,
   disabled,
-  loading,
+  filteredByLocation,
+  locationName,
 }: EmployeeComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -375,122 +392,135 @@ function EmployeeCombobox({
   }, [open]);
 
   return (
-    <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled || loading}
-          type="button"
-          className={cn(
-            "w-full justify-between font-normal",
-            !selected && "text-muted-foreground",
+    <div className="space-y-1.5">
+      {filteredByLocation && locationName && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <MapPin className="h-3 w-3 shrink-0" />
+          Showing employees at{" "}
+          <span className="font-medium text-foreground">{locationName}</span>
+          {employees.length === 0 && (
+            <span className="text-destructive"> — no employees found</span>
           )}
-        >
-          {loading ? (
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading employees...
-            </span>
-          ) : selected ? (
-            <span className="flex items-center gap-2 truncate">
-              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="font-medium text-foreground">
-                {selected.empId}
+        </p>
+      )}
+
+      <Popover open={open} onOpenChange={disabled ? undefined : setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            disabled={disabled}
+            type="button"
+            className={cn(
+              "w-full justify-between font-normal",
+              !selected && "text-muted-foreground",
+            )}
+          >
+            {selected ? (
+              <span className="flex items-center gap-2 truncate">
+                <User className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="font-medium text-foreground">
+                  {selected.empId}
+                </span>
+                <span className="text-muted-foreground">·</span>
+                <span className="truncate text-foreground">
+                  {selected.name}
+                </span>
+                {selected.location?.name && (
+                  <>
+                    <span className="text-muted-foreground">·</span>
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <MapPin className="h-3 w-3" />
+                      {selected.location.name}
+                    </span>
+                  </>
+                )}
               </span>
-              <span className="text-muted-foreground">·</span>
-              <span className="truncate text-foreground">{selected.name}</span>
-              {selected.location?.name && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MapPin className="h-3 w-3" />
-                    {selected.location.name}
-                  </span>
-                </>
-              )}
-            </span>
-          ) : (
-            "Search and select an employee..."
-          )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[--radix-popover-trigger-width] p-0"
-        align="start"
-        sideOffset={4}
-      >
-        <div className="flex items-center border-b px-3 py-2 gap-2">
-          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <input
-            ref={inputRef}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by ID, name, department, location..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-        <div className="max-h-72 overflow-y-auto py-1">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              No employees found.
-            </div>
-          ) : (
-            filtered.map((e) => {
-              const isSelected = String(e.id) === value;
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => {
-                    onChange(String(e.id));
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
-                    isSelected && "bg-accent",
-                  )}
-                >
-                  <Check
+            ) : (
+              "Search and select an employee..."
+            )}
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          className="w-[--radix-popover-trigger-width] p-0"
+          align="start"
+          sideOffset={4}
+        >
+          <div className="flex items-center border-b px-3 py-2 gap-2">
+            <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <input
+              ref={inputRef}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by ID, name, department..."
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="max-h-72 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {filteredByLocation && locationName
+                  ? `No employees found at ${locationName}.`
+                  : "No employees found."}
+              </div>
+            ) : (
+              filtered.map((e) => {
+                const isSelected = String(e.id) === value;
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(String(e.id));
+                      setOpen(false);
+                    }}
                     className={cn(
-                      "mt-0.5 h-4 w-4 shrink-0",
-                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                      "flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                      isSelected && "bg-accent",
                     )}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-foreground">
-                        {e.empId}
-                      </span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="truncate font-medium text-foreground">
-                        {e.name}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                      {e.location?.name && (
-                        <span className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          {e.location.name}
-                        </span>
+                  >
+                    <Check
+                      className={cn(
+                        "mt-0.5 h-4 w-4 shrink-0",
+                        isSelected ? "opacity-100 text-primary" : "opacity-0",
                       )}
-                      {e.department?.name && (
-                        <span className="flex items-center gap-1">
-                          <Building2 className="h-3 w-3" />
-                          {e.department.name}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-foreground">
+                          {e.empId}
                         </span>
-                      )}
-                      {e.email && <span className="truncate">{e.email}</span>}
+                        <span className="text-muted-foreground">·</span>
+                        <span className="truncate font-medium text-foreground">
+                          {e.name}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        {e.location?.name && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {e.location.name}
+                          </span>
+                        )}
+                        {e.department?.name && (
+                          <span className="flex items-center gap-1">
+                            <Building2 className="h-3 w-3" />
+                            {e.department.name}
+                          </span>
+                        )}
+                        {e.email && <span className="truncate">{e.email}</span>}
+                      </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })
-          )}
-        </div>
-      </PopoverContent>
-    </Popover>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 
@@ -500,7 +530,6 @@ interface LocationComboboxProps {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
-  loading?: boolean;
 }
 
 function LocationCombobox({
@@ -508,7 +537,6 @@ function LocationCombobox({
   value,
   onChange,
   disabled,
-  loading,
 }: LocationComboboxProps) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -536,18 +564,14 @@ function LocationCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          disabled={disabled || loading}
+          disabled={disabled}
           type="button"
           className={cn(
             "w-full justify-between font-normal",
             !selected && "text-muted-foreground",
           )}
         >
-          {loading ? (
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading locations...
-            </span>
-          ) : selected ? (
+          {selected ? (
             <span className="flex items-center gap-2 truncate">
               <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="font-medium text-foreground">
@@ -636,20 +660,34 @@ function LocationCombobox({
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
-
 export default function AssetTransferPage() {
   const { getToken } = useAuth();
-  const qc = useQueryClient();
+  const managementApi = useManagementApi();
   const { update: updateAssetRecord } = useAssetApi();
 
-  const getTokenRef = React.useRef<GetTokenFn>(getToken);
+  const getTokenRef = React.useRef(getToken);
+  getTokenRef.current = getToken;
+  const loadAssetLookupsRef = React.useRef(managementApi.loadAssetLookups);
+  loadAssetLookupsRef.current = managementApi.loadAssetLookups;
 
-  // ── Pagination state ───────────────────────────────────────────────────────
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [employees, setEmployees] = React.useState<Employee[]>([]);
+  const [locations, setLocations] = React.useState<Location[]>([]);
+  const [history, setHistory] = React.useState<AssetTransferResponse[]>([]);
+
+  const [loading, setLoading] = React.useState(true);
+  const [historyLoading, setHistoryLoading] = React.useState(false);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+
   const [historyPage, setHistoryPage] = React.useState(0);
+  const [historyTotalPages, setHistoryTotalPages] = React.useState(1);
+  const [historyTotalElements, setHistoryTotalElements] = React.useState(0);
   const [historyPageSize, setHistoryPageSize] = React.useState(25);
+  const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
-  // ── Form state ─────────────────────────────────────────────────────────────
   const [selectedAssetId, setSelectedAssetId] = React.useState("");
   const [transferType, setTransferType] = React.useState<TransferType>("both");
   const [newEmployeeId, setNewEmployeeId] = React.useState("");
@@ -659,83 +697,176 @@ export default function AssetTransferPage() {
   );
   const [reason, setReason] = React.useState("");
 
-  // ── React Query: lookups ───────────────────────────────────────────────────
-  const { data: assets = [], isLoading: assetsLoading } = useQuery({
-    queryKey: QK.assets,
-    queryFn: () => fetchAllPages<Asset>(getTokenRef.current, "/assets"),
-    staleTime: 1000 * 60 * 2,
-  });
+  // ── Data loaders ───────────────────────────────────────────────────────────
+  const loadPageData = React.useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [assetRows, lookups] = await Promise.all([
+        fetchAssets(getTokenRef.current),
+        loadAssetLookupsRef.current(),
+      ]);
+      setAssets(Array.isArray(assetRows) ? assetRows : []);
+      setEmployees(Array.isArray(lookups?.employees) ? lookups.employees : []);
+      setLocations(Array.isArray(lookups?.locations) ? lookups.locations : []);
+    } catch (err) {
+      setError(getReadableErrorMessage(err, "Failed to load data."));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const { data: employees = [], isLoading: employeesLoading } = useQuery({
-    queryKey: QK.employees,
-    queryFn: () => fetchAllPages<Employee>(getTokenRef.current, "/employees"),
-    staleTime: 1000 * 60 * 2,
-  });
+  const loadHistory = React.useCallback(
+    async (page = 0, size?: number) => {
+      setHistoryLoading(true);
+      const pageSize = size ?? historyPageSize;
+      try {
+        const result = await fetchAssetTransfers(
+          getTokenRef.current,
+          page,
+          pageSize,
+        );
+        setHistory(Array.isArray(result?.content) ? result.content : []);
+        setHistoryPage(page);
+        setHistoryTotalPages(result?.totalPages ?? 1);
+        setHistoryTotalElements(result?.totalElements ?? 0);
+      } catch (err) {
+        console.warn("Failed to load transfer history:", err);
+      } finally {
+        setHistoryLoading(false);
+      }
+    },
+    [historyPageSize],
+  );
 
-  const { data: locations = [], isLoading: locationsLoading } = useQuery({
-    queryKey: QK.locations,
-    queryFn: () => fetchAllPages<Location>(getTokenRef.current, "/locations"),
-    staleTime: 1000 * 60 * 2,
-  });
+  React.useEffect(() => {
+    void loadPageData();
+    void loadHistory(0);
+  }, [loadPageData, loadHistory]);
 
-  // ── React Query: transfer history (server-side paginated) ──────────────────
-  const {
-    data: transferPage,
-    isLoading: historyLoading,
-    isFetching: historyFetching,
-  } = useQuery({
-    queryKey: QK.transfers(historyPage, historyPageSize),
-    queryFn: () =>
-      fetchAssetTransfers(getTokenRef.current, historyPage, historyPageSize),
-    placeholderData: keepPreviousData,
-  });
-
-  const history: AssetTransferResponse[] = transferPage?.content ?? [];
-  const historyTotalPages = transferPage?.totalPages ?? 1;
-  const historyTotalElements = transferPage?.totalElements ?? 0;
-
-  // ── Derived ────────────────────────────────────────────────────────────────
+  // ── Derived state ──────────────────────────────────────────────────────────
   const selectedAsset = React.useMemo(
     () => assets.find((a) => a.id === selectedAssetId) ?? null,
     [assets, selectedAssetId],
   );
 
+  // ── Resolve the asset's current location id (handles flat id or nested obj)
+  const assetLocationId = React.useMemo((): string | null => {
+    if (!selectedAsset) return null;
+
+    if (selectedAsset.locationId) return String(selectedAsset.locationId);
+
+    const locRaw = selectedAsset.location as unknown;
+    if (locRaw && typeof locRaw === "object" && "id" in (locRaw as object)) {
+      return String((locRaw as { id: unknown }).id);
+    }
+
+    if (typeof locRaw === "string" && locRaw) {
+      const match = locations.find(
+        (l) => l.name?.trim().toLowerCase() === locRaw.trim().toLowerCase(),
+      );
+      return match ? String(match.id) : null;
+    }
+
+    return null;
+  }, [selectedAsset, locations]);
+
+  // ── Employees filtered by location ────────────────────────────────────────
+  // "both" mode  → filter by newly selected location (newLocationId)
+  // "employee"   → filter by asset's current location (assetLocationId)
+  const locationFilteredEmployees = React.useMemo(() => {
+    if (transferType === "both") {
+      if (!newLocationId) return employees; // no new location yet → show all
+      return employees.filter(
+        (e) =>
+          e.location?.id != null && String(e.location.id) === newLocationId,
+      );
+    }
+    if (!assetLocationId) return employees;
+    return employees.filter(
+      (e) =>
+        e.location?.id != null && String(e.location.id) === assetLocationId,
+    );
+  }, [employees, assetLocationId, transferType, newLocationId]);
+
+  // ── Location name shown in the employee combobox hint ─────────────────────
+  const employeeFilterLocationName = React.useMemo(() => {
+    const filterById =
+      transferType === "both" ? newLocationId : assetLocationId;
+    if (!filterById) return null;
+    return locations.find((l) => String(l.id) === filterById)?.name ?? null;
+  }, [transferType, newLocationId, assetLocationId, locations]);
+
+  // ── Clear selected employee when new location changes in "both" mode ──────
   React.useEffect(() => {
+    if (transferType === "both") {
+      setNewEmployeeId("");
+    }
+  }, [newLocationId, transferType]);
+
+  // ── Reset form fields when asset selection changes ─────────────────────────
+  React.useEffect(() => {
+    setSuccess("");
+    setError("");
     setNewEmployeeId("");
     setNewLocationId("");
   }, [selectedAssetId]);
 
-  // ── Transfer mutation ──────────────────────────────────────────────────────
-  const transferMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedAsset) throw new Error("Please select an asset.");
-      if (!transferDate) throw new Error("Please select a transfer date.");
+  // ── Transfer handler ───────────────────────────────────────────────────────
+  async function handleTransfer() {
+    if (!selectedAsset) {
+      setError("Please select an asset.");
+      return;
+    }
+    if (!transferDate) {
+      setError("Please select a transfer date.");
+      return;
+    }
+    if (
+      (transferType === "employee" || transferType === "both") &&
+      !newEmployeeId
+    ) {
+      setError("Please select a new employee.");
+      return;
+    }
+    if (
+      (transferType === "location" || transferType === "both") &&
+      !newLocationId
+    ) {
+      setError("Please select a new location.");
+      return;
+    }
+
+    if (transferType === "employee" || transferType === "both") {
       if (
-        (transferType === "employee" || transferType === "both") &&
-        !newEmployeeId
-      )
-        throw new Error("Please select a new employee.");
-      if (
-        (transferType === "location" || transferType === "both") &&
-        !newLocationId
-      )
-        throw new Error("Please select a new location.");
-      if (
-        (transferType === "employee" || transferType === "both") &&
         selectedAsset.assignedToId &&
         selectedAsset.assignedToId === newEmployeeId
-      )
-        throw new Error("Asset is already assigned to this employee.");
+      ) {
+        setError("Asset is already assigned to this employee.");
+        return;
+      }
+    }
+    if (transferType === "location" || transferType === "both") {
       if (
-        (transferType === "location" || transferType === "both") &&
         selectedAsset.locationId &&
         selectedAsset.locationId === newLocationId
-      )
-        throw new Error("Asset is already at this location.");
+      ) {
+        setError("Asset is already at this location.");
+        return;
+      }
+    }
 
-      const numericAssetId = parseInt(selectedAsset.id, 10);
-      if (isNaN(numericAssetId)) throw new Error("Invalid asset ID.");
+    const numericAssetId = parseInt(selectedAsset.id, 10);
+    if (isNaN(numericAssetId)) {
+      setError("Invalid asset ID.");
+      return;
+    }
 
+    setSubmitting(true);
+    setError("");
+    setSuccess("");
+
+    try {
       const isEmployeeTransfer =
         transferType === "employee" || transferType === "both";
       const isLocationTransfer =
@@ -744,15 +875,23 @@ export default function AssetTransferPage() {
       const resolvePrevEmployeeId = (): number | null => {
         if (!isEmployeeTransfer) return null;
         if (selectedAsset.assignedToId) {
-          const p = parseInt(String(selectedAsset.assignedToId), 10);
-          if (!isNaN(p)) return p;
+          const parsed = parseInt(String(selectedAsset.assignedToId), 10);
+          if (!isNaN(parsed)) return parsed;
         }
-        const raw = selectedAsset.assignedTo as unknown;
-        if (raw && typeof raw === "object" && "id" in (raw as object)) {
-          const p = parseInt(String((raw as { id: unknown }).id), 10);
-          if (!isNaN(p)) return p;
+        const assignedToRaw = selectedAsset.assignedTo as unknown;
+        if (
+          assignedToRaw &&
+          typeof assignedToRaw === "object" &&
+          "id" in (assignedToRaw as object)
+        ) {
+          const parsed = parseInt(
+            String((assignedToRaw as { id: unknown }).id),
+            10,
+          );
+          if (!isNaN(parsed)) return parsed;
         }
-        const nameStr = typeof raw === "string" ? raw : null;
+        const nameStr =
+          typeof assignedToRaw === "string" ? assignedToRaw : null;
         if (nameStr) {
           const namePart = nameStr.includes(" - ")
             ? nameStr.split(" - ").slice(1).join(" - ").trim()
@@ -771,15 +910,22 @@ export default function AssetTransferPage() {
       const resolvePrevLocationId = (): number | null => {
         if (!isLocationTransfer) return null;
         if (selectedAsset.locationId) {
-          const p = parseInt(String(selectedAsset.locationId), 10);
-          if (!isNaN(p)) return p;
+          const parsed = parseInt(String(selectedAsset.locationId), 10);
+          if (!isNaN(parsed)) return parsed;
         }
-        const raw = selectedAsset.location as unknown;
-        if (raw && typeof raw === "object" && "id" in (raw as object)) {
-          const p = parseInt(String((raw as { id: unknown }).id), 10);
-          if (!isNaN(p)) return p;
+        const locationRaw = selectedAsset.location as unknown;
+        if (
+          locationRaw &&
+          typeof locationRaw === "object" &&
+          "id" in (locationRaw as object)
+        ) {
+          const parsed = parseInt(
+            String((locationRaw as { id: unknown }).id),
+            10,
+          );
+          if (!isNaN(parsed)) return parsed;
         }
-        const nameStr = typeof raw === "string" ? raw : null;
+        const nameStr = typeof locationRaw === "string" ? locationRaw : null;
         if (nameStr) {
           const match = locations.find(
             (l) =>
@@ -789,6 +935,9 @@ export default function AssetTransferPage() {
         }
         return null;
       };
+
+      const prevEmployeeNumericId = resolvePrevEmployeeId();
+      const prevLocationNumericId = resolvePrevLocationId();
 
       const assetPayload = buildAssetPayload({
         asset: selectedAsset,
@@ -808,16 +957,16 @@ export default function AssetTransferPage() {
         TransferDate: transferDate,
         reason: reason.trim() || "N/A",
         fromEmployeeId:
-          isEmployeeTransfer && resolvePrevEmployeeId()
-            ? { id: resolvePrevEmployeeId()! }
+          isEmployeeTransfer && prevEmployeeNumericId
+            ? { id: prevEmployeeNumericId }
             : null,
         toEmployeeId:
           isEmployeeTransfer && newEmployeeId
             ? { id: parseInt(newEmployeeId, 10) }
             : null,
         fromLocationId:
-          isLocationTransfer && resolvePrevLocationId()
-            ? { id: resolvePrevLocationId()! }
+          isLocationTransfer && prevLocationNumericId
+            ? { id: prevLocationNumericId }
             : null,
         toLocationId:
           isLocationTransfer && newLocationId
@@ -825,34 +974,31 @@ export default function AssetTransferPage() {
             : null,
       };
 
-      await createAssetTransfer(getTokenRef.current, dto);
-      return updatedAsset;
-    },
-    onSuccess: (updatedAsset) => {
-      // Invalidate both lookups and history
-      void qc.invalidateQueries({ queryKey: QK.assets });
-      void qc.invalidateQueries({ queryKey: ["asset-transfers"] });
+      const savedTransfer = await createAssetTransfer(getTokenRef.current, dto);
+
+      setAssets((prev) =>
+        prev.map((item) => (item.id === updatedAsset.id ? updatedAsset : item)),
+      );
+      setSelectedAssetId(updatedAsset.id);
+      setHistory((prev) => [savedTransfer, ...prev]);
 
       setTransferType("both");
       setNewEmployeeId("");
       setNewLocationId("");
       setTransferDate(new Date().toISOString().slice(0, 10));
       setReason("");
-      setSelectedAssetId(updatedAsset.id);
 
-      toast.success("Transfer complete", {
-        description: `${updatedAsset.assetCode} is now assigned to ${
+      setSuccess(
+        `Transfer complete — ${updatedAsset.assetCode} is now assigned to ${
           extractName(updatedAsset.assignedTo as unknown) || "nobody"
         } at ${extractName(updatedAsset.location as unknown) || "no location"}.`,
-      });
-    },
-    onError: (err) => {
-      const msg = err instanceof Error ? err.message : "Transfer failed.";
-      toast.error("Transfer failed", { description: msg });
-    },
-  });
-
-  const pageLoading = assetsLoading || employeesLoading || locationsLoading;
+      );
+    } catch (err) {
+      setError(getReadableErrorMessage(err, "Transfer failed."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -871,7 +1017,22 @@ export default function AssetTransferPage() {
         </Badge>
       </div>
 
-      {pageLoading ? (
+      {/* Alerts */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertTitle>Something went wrong</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {success && (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>Transfer Successful</AlertTitle>
+          <AlertDescription>{success}</AlertDescription>
+        </Alert>
+      )}
+
+      {loading ? (
         <Card>
           <CardContent className="flex min-h-[320px] items-center justify-center">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -895,7 +1056,7 @@ export default function AssetTransferPage() {
                     assets={assets}
                     value={selectedAssetId}
                     onChange={setSelectedAssetId}
-                    disabled={transferMutation.isPending}
+                    disabled={submitting}
                   />
                 </div>
 
@@ -904,7 +1065,10 @@ export default function AssetTransferPage() {
                     <Label>Transfer Type</Label>
                     <Select
                       value={transferType}
-                      onValueChange={(v) => setTransferType(v as TransferType)}
+                      onValueChange={(v) => {
+                        setTransferType(v as TransferType);
+                        setNewEmployeeId("");
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select transfer type" />
@@ -932,19 +1096,7 @@ export default function AssetTransferPage() {
                   </div>
                 </div>
 
-                {(transferType === "employee" || transferType === "both") && (
-                  <div className="space-y-2">
-                    <Label>New Employee</Label>
-                    <EmployeeCombobox
-                      employees={employees}
-                      value={newEmployeeId}
-                      onChange={setNewEmployeeId}
-                      disabled={transferMutation.isPending}
-                      loading={employeesLoading}
-                    />
-                  </div>
-                )}
-
+                {/* Location picker — shown first in "both" mode so employee list can filter */}
                 {(transferType === "location" || transferType === "both") && (
                   <div className="space-y-2">
                     <Label>New Location</Label>
@@ -952,8 +1104,26 @@ export default function AssetTransferPage() {
                       locations={locations}
                       value={newLocationId}
                       onChange={setNewLocationId}
-                      disabled={transferMutation.isPending}
-                      loading={locationsLoading}
+                      disabled={submitting}
+                    />
+                  </div>
+                )}
+
+                {/* Employee picker — filtered to newly selected location in "both" mode */}
+                {(transferType === "employee" || transferType === "both") && (
+                  <div className="space-y-2">
+                    <Label>New Employee</Label>
+                    <EmployeeCombobox
+                      employees={locationFilteredEmployees}
+                      value={newEmployeeId}
+                      onChange={setNewEmployeeId}
+                      disabled={submitting}
+                      filteredByLocation={
+                        transferType === "both"
+                          ? !!newLocationId
+                          : !!selectedAsset
+                      }
+                      locationName={employeeFilterLocationName ?? undefined}
                     />
                   </div>
                 )}
@@ -973,24 +1143,20 @@ export default function AssetTransferPage() {
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      void qc.invalidateQueries({ queryKey: QK.assets });
-                      void qc.invalidateQueries({ queryKey: QK.employees });
-                      void qc.invalidateQueries({ queryKey: QK.locations });
-                      void qc.invalidateQueries({
-                        queryKey: ["asset-transfers"],
-                      });
+                      void loadPageData();
+                      void loadHistory(0);
                     }}
-                    disabled={transferMutation.isPending}
+                    disabled={loading || submitting}
                   >
                     Refresh Data
                   </Button>
                   <Button
                     type="button"
-                    onClick={() => transferMutation.mutate()}
-                    disabled={transferMutation.isPending}
+                    onClick={() => void handleTransfer()}
+                    disabled={submitting}
                     className="gap-2"
                   >
-                    {transferMutation.isPending ? (
+                    {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Repeat className="h-4 w-4" />
@@ -1023,7 +1189,9 @@ export default function AssetTransferPage() {
                         {selectedAsset.category}
                       </p>
                     </div>
+
                     <Separator />
+
                     <div className="space-y-3 text-sm">
                       <div className="flex items-start gap-2">
                         <User className="mt-0.5 h-4 w-4 text-muted-foreground" />
@@ -1115,13 +1283,11 @@ export default function AssetTransferPage() {
                   variant="outline"
                   size="sm"
                   type="button"
-                  onClick={() =>
-                    void qc.invalidateQueries({ queryKey: ["asset-transfers"] })
-                  }
-                  disabled={historyFetching}
+                  onClick={() => void loadHistory(0)}
+                  disabled={historyLoading}
                   className="gap-2"
                 >
-                  {historyFetching ? (
+                  {historyLoading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Repeat className="h-3.5 w-3.5" />
@@ -1239,7 +1405,7 @@ export default function AssetTransferPage() {
                 </Table>
               </div>
 
-              {/* Pagination footer */}
+              {/* ── Pagination footer ── */}
               <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
                 <p className="text-sm text-muted-foreground">
                   {historyTotalElements === 0
@@ -1249,6 +1415,7 @@ export default function AssetTransferPage() {
                         historyTotalElements,
                       )} of ${historyTotalElements}`}
                 </p>
+
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">
@@ -1257,8 +1424,9 @@ export default function AssetTransferPage() {
                     <Select
                       value={String(historyPageSize)}
                       onValueChange={(v) => {
-                        setHistoryPageSize(Number(v));
-                        setHistoryPage(0);
+                        const newSize = Number(v);
+                        setHistoryPageSize(newSize);
+                        void loadHistory(0, newSize);
                       }}
                     >
                       <SelectTrigger className="h-8 w-[70px]">
@@ -1273,14 +1441,15 @@ export default function AssetTransferPage() {
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
                       size="icon"
                       className="h-8 w-8"
                       type="button"
-                      onClick={() => setHistoryPage(0)}
-                      disabled={historyPage === 0 || historyFetching}
+                      onClick={() => void loadHistory(0)}
+                      disabled={historyPage === 0 || historyLoading}
                       title="First page"
                     >
                       <ChevronsLeft className="h-4 w-4" />
@@ -1290,8 +1459,8 @@ export default function AssetTransferPage() {
                       size="icon"
                       className="h-8 w-8"
                       type="button"
-                      onClick={() => setHistoryPage((p) => p - 1)}
-                      disabled={historyPage === 0 || historyFetching}
+                      onClick={() => void loadHistory(historyPage - 1)}
+                      disabled={historyPage === 0 || historyLoading}
                       title="Previous page"
                     >
                       <ChevronLeft className="h-4 w-4" />
@@ -1304,9 +1473,9 @@ export default function AssetTransferPage() {
                       size="icon"
                       className="h-8 w-8"
                       type="button"
-                      onClick={() => setHistoryPage((p) => p + 1)}
+                      onClick={() => void loadHistory(historyPage + 1)}
                       disabled={
-                        historyPage + 1 >= historyTotalPages || historyFetching
+                        historyPage + 1 >= historyTotalPages || historyLoading
                       }
                       title="Next page"
                     >
@@ -1317,9 +1486,9 @@ export default function AssetTransferPage() {
                       size="icon"
                       className="h-8 w-8"
                       type="button"
-                      onClick={() => setHistoryPage(historyTotalPages - 1)}
+                      onClick={() => void loadHistory(historyTotalPages - 1)}
                       disabled={
-                        historyPage + 1 >= historyTotalPages || historyFetching
+                        historyPage + 1 >= historyTotalPages || historyLoading
                       }
                       title="Last page"
                     >

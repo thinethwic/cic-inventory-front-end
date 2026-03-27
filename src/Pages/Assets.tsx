@@ -25,6 +25,7 @@ import {
   Calendar,
   ShieldCheck,
   Tag,
+  Printer,
   Hash,
   Barcode,
   Info,
@@ -40,6 +41,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+
+import { AssetGatePass } from "@/components/Gatepassprint";
 
 import { useAuth } from "@clerk/clerk-react";
 import { useManagementApi } from "@/lib/management-api";
@@ -111,6 +114,9 @@ import type {
 import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
 import QRCodeLib from "qrcode";
 import { cn } from "@/lib/utils";
+
+import { hasRole } from "@/utils/permissions";
+import { usePermissions } from "@/hooks/usePermissions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -333,6 +339,8 @@ interface AssetDetailSheetProps {
   onEdit: (asset: Asset) => void;
   onDelete: (id: string) => void;
   onViewQR: (asset: Asset) => void;
+  onGatePass: (asset: Asset) => void;
+  isAdmin: boolean;
 }
 
 function DetailRow({
@@ -365,7 +373,16 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
   onEdit,
   onDelete,
   onViewQR,
+  onGatePass,
+  isAdmin, // ← ADD THIS
 }: AssetDetailSheetProps) {
+  const handleGatePass = React.useCallback(() => {
+    if (asset) {
+      onGatePass(asset);
+      onClose();
+    }
+  }, [asset, onGatePass, onClose]);
+
   const handleEdit = React.useCallback(() => {
     if (asset) {
       onEdit(asset);
@@ -492,62 +509,75 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
           <Separator />
 
           {/* Procurement section */}
+
           <div className="px-6 py-5">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Procurement
-            </p>
+            {isAdmin && (
+              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Procurement
+              </p>
+            )}
             <div className="space-y-3">
-              <DetailRow
-                icon={Building2}
-                label="Supplier"
-                value={asset.supplierName}
-              />
-              <DetailRow
-                icon={Calendar}
-                label="Purchase Date"
-                value={
-                  asset.purchaseDate
-                    ? new Date(asset.purchaseDate).toLocaleDateString(
-                        undefined,
-                        {
-                          year: "numeric",
-                          month: "long",
-                          day: "numeric",
-                        },
-                      )
-                    : undefined
-                }
-              />
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                  <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-muted-foreground">Warranty End</p>
-                  {asset.warrantyEnd ? (
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">
-                        {new Date(asset.warrantyEnd).toLocaleDateString(
+              {isAdmin && (
+                <DetailRow
+                  icon={Building2}
+                  label="Supplier"
+                  value={asset.supplierName}
+                />
+              )}
+              {isAdmin && (
+                <DetailRow
+                  icon={Calendar}
+                  label="Purchase Date"
+                  value={
+                    asset.purchaseDate
+                      ? new Date(asset.purchaseDate).toLocaleDateString(
                           undefined,
                           {
                             year: "numeric",
                             month: "long",
                             day: "numeric",
                           },
+                        )
+                      : undefined
+                  }
+                />
+              )}
+              <div className="flex items-start gap-3">
+                {isAdmin && (
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
+                    <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+                  </div>
+                )}
+                {isAdmin && (
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-muted-foreground">
+                      Warranty End
+                    </p>
+                    {asset.warrantyEnd ? (
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">
+                          {new Date(asset.warrantyEnd).toLocaleDateString(
+                            undefined,
+                            {
+                              year: "numeric",
+                              month: "long",
+                              day: "numeric",
+                            },
+                          )}
+                        </p>
+                        {warrantyStatus && (
+                          <span
+                            className={`text-xs font-medium ${warrantyStatus.color}`}
+                          >
+                            ({warrantyStatus.label})
+                          </span>
                         )}
-                      </p>
-                      {warrantyStatus && (
-                        <span
-                          className={`text-xs font-medium ${warrantyStatus.color}`}
-                        >
-                          ({warrantyStatus.label})
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground italic">—</p>
-                  )}
-                </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">—</p>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -556,27 +586,47 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
         {/* Footer actions */}
         <div className="border-t px-6 py-4">
           <div className="flex flex-wrap gap-2">
-            <Button className="flex-1 gap-2" onClick={handleEdit} type="button">
-              <Pencil className="h-3.5 w-3.5" /> Edit Asset
-            </Button>
-            <Button
-              variant="outline"
-              className="gap-2"
-              onClick={handleQR}
-              type="button"
-            >
-              <QrCode className="h-3.5 w-3.5" /> QR Code
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={handleDelete}
-              type="button"
-              title="Delete asset"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            {isAdmin && (
+              <Button
+                className="flex-1 gap-2"
+                onClick={handleEdit}
+                type="button"
+              >
+                <Pencil className="h-3.5 w-3.5" /> Edit Asset
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={handleQR}
+                type="button"
+              >
+                <QrCode className="h-3.5 w-3.5" /> QR Code
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={handleGatePass}
+                type="button"
+              >
+                <Printer className="h-3.5 w-3.5" /> Gate Pass
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="icon"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={handleDelete}
+                type="button"
+                title="Delete asset"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       </SheetContent>
@@ -1234,6 +1284,11 @@ const SearchCombobox = React.memo(function SearchCombobox({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function Assets() {
+  const { role } = usePermissions();
+  const isAdmin = hasRole(role, ["admin", "admin_user"]);
+
+  const [gpAsset, setGpAsset] = React.useState<Asset | null>(null);
+
   // ── Filter state ─────────────────────────────────────────────────────────────
   const [supplierFilter, setSupplierFilter] = React.useState("All");
   const [locationFilter, setLocationFilter] = React.useState("All");
@@ -1749,9 +1804,11 @@ export default function Assets() {
             )}
           </Button>
 
-          <Button onClick={openAdd} className="gap-2" type="button">
-            <Plus className="h-4 w-4" /> Add Asset
-          </Button>
+          {isAdmin && (
+            <Button onClick={openAdd} className="gap-2" type="button">
+              <Plus className="h-4 w-4" /> Add Asset
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1802,7 +1859,14 @@ export default function Assets() {
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
 
-        <CardContent className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+        <CardContent
+          className={cn(
+            "grid gap-3",
+            isAdmin
+              ? "sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5"
+              : "sm:grid-cols-2 md:grid-cols-3",
+          )}
+        >
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
@@ -1849,29 +1913,32 @@ export default function Assets() {
             </Select>
           </div>
 
-          <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Supplier</div>
-            <SearchCombobox
-              value={supplierFilter}
-              onValueChange={setSupplierFilter}
-              options={supplierOptions}
-              placeholder="All Suppliers"
-              allLabel="All Suppliers"
-              searchPlaceholder="Search suppliers…"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Location</div>
-            <SearchCombobox
-              value={locationFilter}
-              onValueChange={setLocationFilter}
-              options={locationOptions}
-              placeholder="All Locations"
-              allLabel="All Locations"
-              searchPlaceholder="Search locations…"
-            />
-          </div>
+          {isAdmin && (
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Supplier</div>
+              <SearchCombobox
+                value={supplierFilter}
+                onValueChange={setSupplierFilter}
+                options={supplierOptions}
+                placeholder="All Suppliers"
+                allLabel="All Suppliers"
+                searchPlaceholder="Search suppliers…"
+              />
+            </div>
+          )}
+          {isAdmin && (
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Location</div>
+              <SearchCombobox
+                value={locationFilter}
+                onValueChange={setLocationFilter}
+                options={locationOptions}
+                placeholder="All Locations"
+                allLabel="All Locations"
+                searchPlaceholder="Search locations…"
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1947,13 +2014,15 @@ export default function Assets() {
                     dir={sortDir}
                     onSort={handleSort}
                   />
-                  <SortableHead
-                    label="Supplier"
-                    sortKey="supplierName"
-                    current={sortKey}
-                    dir={sortDir}
-                    onSort={handleSort}
-                  />
+                  {isAdmin && (
+                    <SortableHead
+                      label="Supplier"
+                      sortKey="supplierName"
+                      current={sortKey}
+                      dir={sortDir}
+                      onSort={handleSort}
+                    />
+                  )}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -2005,9 +2074,11 @@ export default function Assets() {
                       <TableCell className="text-muted-foreground">
                         {a.location}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {a.supplierName || "-"}
-                      </TableCell>
+                      {isAdmin && (
+                        <TableCell className="text-muted-foreground">
+                          {a.supplierName || "-"}
+                        </TableCell>
+                      )}
                       <TableCell
                         className="text-right"
                         onClick={(e) => e.stopPropagation()}
@@ -2027,27 +2098,39 @@ export default function Assets() {
                             <DropdownMenuItem onClick={() => openDetail(a)}>
                               <Info className="mr-2 h-4 w-4" /> View Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={async () => {
-                                await loadLookups();
-                                openEdit(a);
-                              }}
-                            >
-                              <Pencil className="mr-2 h-4 w-4" /> Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setQrAsset(a)}>
-                              <QrCode className="mr-2 h-4 w-4" /> View QR Code
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => {
-                                setDeleteError(null);
-                                setDeleteId(a.id);
-                              }}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
-                            </DropdownMenuItem>
+                            {isAdmin && (
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  await loadLookups();
+                                  openEdit(a);
+                                }}
+                              >
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                            )}
+                            {isAdmin && (
+                              <DropdownMenuItem onClick={() => setQrAsset(a)}>
+                                <QrCode className="mr-2 h-4 w-4" /> View QR Code
+                              </DropdownMenuItem>
+                            )}
+                            {isAdmin && <DropdownMenuSeparator />}
+
+                            {isAdmin && (
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => {
+                                  setDeleteError(null);
+                                  setDeleteId(a.id);
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </DropdownMenuItem>
+                            )}
+                            {isAdmin && (
+                              <DropdownMenuItem onClick={() => setGpAsset(a)}>
+                                <Printer className="mr-2 h-4 w-4" /> Gate Pass
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -2085,6 +2168,8 @@ export default function Assets() {
           setDeleteId(id);
         }}
         onViewQR={setQrAsset}
+        onGatePass={setGpAsset}
+        isAdmin={isAdmin}
       />
 
       {/* ── Add / Edit Dialog ── */}
@@ -2379,6 +2464,12 @@ export default function Assets() {
         asset={qrAsset}
         open={!!qrAsset}
         onClose={() => setQrAsset(null)}
+      />
+
+      <AssetGatePass
+        asset={gpAsset}
+        open={!!gpAsset}
+        onClose={() => setGpAsset(null)}
       />
     </div>
   );

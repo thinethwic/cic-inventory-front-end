@@ -5,6 +5,7 @@ import SignUpPage from "./Pages/SignUpPage";
 
 import DashboardLayout from "./components/DashboardLayout";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
+import AdminOnlyRoute from "./components/AdminOnlyRoute"; // ← ADD
 
 import Dashboard from "./Pages/DashboardPage";
 import Assets from "./Pages/Assets";
@@ -21,7 +22,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignUpPage />} />
 
-      {/* Admin Protected Layout */}
+      {/* Protected Layout — all logged-in roles */}
       <Route
         path="/"
         element={
@@ -33,11 +34,34 @@ export default function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="assets" element={<Assets />} />
-        <Route path="employees" element={<EmployeesPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="assetTransfer" element={<AssetTransfer />} />
         <Route path="settings" element={<UnderConstructionPage />} />
+
+        {/* Admin-only routes */}
+        <Route
+          path="employees"
+          element={
+            <AdminOnlyRoute>
+              <EmployeesPage />
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="reports"
+          element={
+            <AdminOnlyRoute>
+              <ReportsPage />
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="assetTransfer"
+          element={
+            <AdminOnlyRoute>
+              <AssetTransfer />
+            </AdminOnlyRoute>
+          }
+        />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

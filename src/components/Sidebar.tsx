@@ -24,45 +24,105 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 
+/* ================= TYPES ================= */
+
+type Role = "admin" | "admin_user" | "user";
+type UserLocation = string;
 type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
+  roles?: Role[];
 };
 
+/* ================= NAV CONFIG ================= */
+
 const navItems: NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/assets", label: "Assets", icon: Laptop },
-  { to: "/employees", label: "Employees", icon: Users },
-  { to: "/maintenance", label: "Maintenance", icon: Wrench },
-  { to: "/reports", label: "Reports", icon: FileBarChart2 },
-  { to: "/assetTransfer", label: "Asset Transfer", icon: ShieldCheck },
-  { to: "/settings", label: "Settings", icon: Settings },
+  {
+    to: "/dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    roles: ["admin", "admin_user", "user"],
+  },
+  {
+    to: "/assets",
+    label: "Assets",
+    icon: Laptop,
+    roles: ["admin", "admin_user", "user"],
+  },
+  {
+    to: "/employees",
+    label: "Employees",
+    icon: Users,
+    roles: ["admin", "admin_user"],
+  },
+  {
+    to: "/maintenance",
+    label: "Maintenance",
+    icon: Wrench,
+    roles: ["admin", "admin_user", "user"],
+  },
+  {
+    to: "/reports",
+    label: "Reports",
+    icon: FileBarChart2,
+    roles: ["admin", "admin_user"],
+  },
+  {
+    to: "/assetTransfer",
+    label: "Asset Transfer",
+    icon: ShieldCheck,
+    roles: ["admin", "admin_user"],
+  },
+  {
+    to: "/settings",
+    label: "Settings",
+    icon: Settings,
+    roles: ["admin", "admin_user", "user"],
+  },
 ];
+
+/* ================= COMPONENT ================= */
 
 export default function AppSidebar() {
   const { user } = useUser();
   const location = useLocation();
 
+  // 🔐 Get role + department from Clerk metadata
+  const role = user?.publicMetadata?.role as Role | undefined;
+  const Userlocation = user?.publicMetadata?.location as
+    | UserLocation
+    | undefined;
+
+  // 🧠 Permission check
+  const canAccess = (item: NavItem) => {
+    const roleMatch = !item.roles || (role && item.roles.includes(role));
+
+    return roleMatch;
+  };
+
+  // 🎯 Filter sidebar items
+  const filteredNavItems = navItems.filter(canAccess);
+
   return (
     <Sidebar collapsible="offcanvas" className="hidden md:flex">
-      {/* Header (Logo + Title) */}
+      {/* ================= HEADER ================= */}
       <SidebarHeader>
         <div className="flex items-center gap-3 px-2 py-2">
           <img src={logo} alt="CIC Logo" className="h-10 w-10 object-contain" />
           <div className="leading-tight">
             <div className="font-semibold">Asset Management</div>
             <div className="text-xs text-muted-foreground">
-              CIC Feeds PVT LTD{" "}
+              CIC Feeds PVT LTD
             </div>
           </div>
         </div>
       </SidebarHeader>
 
-      {/* Content (Menu) */}
+      {/* ================= MENU ================= */}
       <SidebarContent>
         <SidebarMenu>
-          {navItems.map((item) => {
+          {filteredNavItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.to;
 
@@ -84,7 +144,7 @@ export default function AppSidebar() {
         </SidebarMenu>
       </SidebarContent>
 
-      {/* Footer (User) */}
+      {/* ================= FOOTER ================= */}
       <SidebarFooter>
         <div className="flex items-center gap-3 px-2 py-2">
           <UserButton
@@ -93,10 +153,21 @@ export default function AppSidebar() {
             }}
             afterSignOutUrl="/login"
           />
+
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">
               {user?.fullName ?? "User"}
             </div>
+
+            {/* 🔥 Show role + department */}
+            <div className="truncate text-xs text-muted-foreground">
+              {role ?? "role"}
+            </div>
+
+            <div className="truncate text-xs text-muted-foreground">
+              {Userlocation ?? "location"}
+            </div>
+
             <div className="text-xs text-muted-foreground truncate">
               Version 1.1.5
             </div>
@@ -104,7 +175,6 @@ export default function AppSidebar() {
         </div>
       </SidebarFooter>
 
-      {/* Small rail on the edge */}
       <SidebarRail />
     </Sidebar>
   );
