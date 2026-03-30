@@ -12,6 +12,8 @@ import {
 import type { Asset } from "@/types";
 import type { Maintenance } from "@/types";
 
+import logo from "@/assets/Logo.png";
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fmtDate = (d = new Date()) =>
@@ -223,7 +225,7 @@ function GatePassCard({
         {/* Left: Logo + Title + Location */}
         <div className="flex items-center gap-3.5">
           <img
-            src="src/assets/Logo.png"
+            src={logo}
             alt="CIC Logo"
             className="h-40 shrink-0 object-contain"
           />
