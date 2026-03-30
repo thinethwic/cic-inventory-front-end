@@ -28,6 +28,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  MapPin,
+  X,
 } from "lucide-react";
 import { useAuth } from "@clerk/clerk-react";
 
@@ -96,6 +98,7 @@ import {
   fetchMaintenancePage,
   fetchAllAssetsForMaintenance,
   fetchAllSuppliers,
+  fetchAllLocations,
   createMaintenance,
   updateMaintenance,
   deleteMaintenance,
@@ -105,19 +108,6 @@ import { useAssetApi } from "@/lib/api";
 
 import { hasRole } from "@/utils/permissions";
 import { usePermissions } from "@/hooks/usePermissions";
-
-// ─── Query keys ───────────────────────────────────────────────────────────────
-const QK = {
-  maintenance: (
-    page: number,
-    size: number,
-    search: string,
-    status: string,
-    priority: string,
-  ) => ["maintenance", page, size, search, status, priority] as const,
-  assets: ["maintenance-assets"] as const,
-  suppliers: ["maintenance-suppliers"] as const,
-};
 
 // ─── Asset status mapping ─────────────────────────────────────────────────────
 function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
@@ -171,19 +161,17 @@ function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
 }
 
 // ─── Asset Combobox ───────────────────────────────────────────────────────────
-interface AssetComboboxProps {
-  assets: Asset[];
-  value: string;
-  onChange: (assetId: string) => void;
-  disabled?: boolean;
-}
-
 function AssetCombobox({
   assets,
   value,
   onChange,
   disabled,
-}: AssetComboboxProps) {
+}: {
+  assets: Asset[];
+  value: string;
+  onChange: (assetId: string) => void;
+  disabled?: boolean;
+}) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -314,21 +302,19 @@ function AssetCombobox({
 }
 
 // ─── Supplier Combobox ────────────────────────────────────────────────────────
-interface SupplierComboboxProps {
-  suppliers: Supplier[];
-  value: string;
-  onChange: (name: string) => void;
-  disabled?: boolean;
-  loading?: boolean;
-}
-
 function SupplierCombobox({
   suppliers,
   value,
   onChange,
   disabled,
   loading,
-}: SupplierComboboxProps) {
+}: {
+  suppliers: Supplier[];
+  value: string;
+  onChange: (name: string) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -447,6 +433,164 @@ function SupplierCombobox({
   );
 }
 
+// ─── Location Filter Combobox ─────────────────────────────────────────────────
+function LocationCombobox({
+  locations,
+  value,
+  onChange,
+  loading,
+}: {
+  locations: string[];
+  value: string;
+  onChange: (location: string) => void;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return locations;
+    return locations.filter((l) => l.toLowerCase().includes(q));
+  }, [locations, search]);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          type="button"
+          disabled={loading}
+          className={cn(
+            "w-full justify-between font-normal",
+            !value && "text-muted-foreground",
+          )}
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+            </span>
+          ) : value ? (
+            <span className="flex items-center gap-2 truncate">
+              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="font-medium text-foreground truncate">
+                {value}
+              </span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 shrink-0" />
+              All locations
+            </span>
+          )}
+          <div className="ml-2 flex items-center gap-1 shrink-0">
+            {value && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    onChange("");
+                  }
+                }}
+                className="rounded p-0.5 hover:bg-muted text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </span>
+            )}
+            <ChevronsUpDown className="h-4 w-4 opacity-50" />
+          </div>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center border-b px-3 py-2 gap-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search locations..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          <button
+            type="button"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+              !value && "bg-accent",
+            )}
+          >
+            <Check
+              className={cn(
+                "h-4 w-4 shrink-0",
+                !value ? "opacity-100 text-primary" : "opacity-0",
+              )}
+            />
+            <span className="text-muted-foreground">All locations</span>
+          </button>
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No locations found.
+            </div>
+          ) : (
+            filtered.map((loc) => {
+              const isSelected = loc === value;
+              return (
+                <button
+                  key={loc}
+                  type="button"
+                  onClick={() => {
+                    onChange(loc);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <span className="flex items-center gap-2">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    {loc}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Technician Toggle ────────────────────────────────────────────────────────
 type TechnicianType = "internal" | "supplier";
 
@@ -494,20 +638,17 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 export default function MaintenancePage() {
   const { role } = usePermissions();
   const isAdmin = hasRole(role, ["admin", "admin_user"]);
-
   const { user } = useUser();
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
+  const { updateStatus: updateAssetStatus } = useAssetApi();
+
   const [gpTicket, setGpTicket] = React.useState<Maintenance | null>(null);
   const userLocation = (user?.publicMetadata?.location as string) ?? "";
 
   const filteredStatusOptions = isAdmin
     ? maintenanceStatusOptions
     : maintenanceStatusOptions.filter((s) => s === "Open");
-
-  const { getToken } = useAuth();
-  const qc = useQueryClient();
-  const { updateStatus: updateAssetStatus } = useAssetApi();
-
-  const getTokenRef = React.useRef(getToken);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [q, setQ] = React.useState("");
@@ -518,9 +659,10 @@ export default function MaintenancePage() {
   const [priorityFilter, setPriorityFilter] = React.useState<
     MaintenancePriority | "All"
   >("All");
+  const [locationFilter, setLocationFilter] = React.useState("");
 
   React.useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q), 400);
+    const t = setTimeout(() => setDebouncedQ(q.trim()), 400);
     return () => clearTimeout(t);
   }, [q]);
 
@@ -530,51 +672,74 @@ export default function MaintenancePage() {
 
   React.useEffect(() => {
     setPage(0);
-  }, [debouncedQ, statusFilter, priorityFilter]);
+  }, [debouncedQ, statusFilter, priorityFilter, locationFilter]);
+
+  // ── Normalise filter values ────────────────────────────────────────────────
+  // Convert "All" → "" once here. Both queryKey and queryFn read these same
+  // variables so they can never drift apart.
+  const apiStatus = statusFilter === "All" ? "" : statusFilter;
+  const apiPriority = priorityFilter === "All" ? "" : priorityFilter;
+  const apiLocation = locationFilter; // "" means "all"
 
   // ── React Query ────────────────────────────────────────────────────────────
+  // THE FIX: queryFn destructures its values directly from queryKey.
+  // React Query passes the exact key that triggered this call into queryFn,
+  // so the fetcher always receives the values that are actually in the cache
+  // key — a stale closure can never cause a mismatch.
   const {
     data: maintenancePage,
     isLoading,
     isFetching,
   } = useQuery({
-    queryKey: QK.maintenance(
+    queryKey: [
+      "maintenance",
       page,
       pageSize,
       debouncedQ,
-      statusFilter,
-      priorityFilter,
-    ),
-    queryFn: () =>
-      fetchMaintenancePage(
-        getTokenRef.current,
-        page,
-        pageSize,
-        debouncedQ,
-        statusFilter,
-        priorityFilter,
-      ),
+      apiStatus,
+      apiPriority,
+      apiLocation,
+    ] as const,
+    queryFn: ({ queryKey }) => {
+      const [, _page, _size, _search, _status, _priority, _location] = queryKey;
+      return fetchMaintenancePage(
+        getToken,
+        _page,
+        _size,
+        _search,
+        _status,
+        _priority,
+        _location,
+      );
+    },
     placeholderData: keepPreviousData,
   });
 
   const rows: Maintenance[] = maintenancePage?.content ?? [];
   const totalElements = maintenancePage?.totalElements ?? 0;
   const totalPages = maintenancePage?.totalPages ?? 1;
-
   const rangeStart = totalElements === 0 ? 0 : page * pageSize + 1;
   const rangeEnd = Math.min((page + 1) * pageSize, totalElements);
 
   const { data: assets = [] } = useQuery({
-    queryKey: QK.assets,
-    queryFn: () => fetchAllAssetsForMaintenance(getTokenRef.current),
+    queryKey: ["maintenance-assets"],
+    queryFn: () => fetchAllAssetsForMaintenance(getToken),
     staleTime: 1000 * 60 * 2,
   });
 
   const [formOpen, setFormOpen] = React.useState(false);
+
   const { data: suppliers = [], isLoading: suppliersLoading } = useQuery({
-    queryKey: QK.suppliers,
-    queryFn: () => fetchAllSuppliers(getTokenRef.current),
+    queryKey: ["maintenance-suppliers"],
+    queryFn: () => fetchAllSuppliers(getToken),
     enabled: formOpen,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const { data: locations = [], isLoading: locationsLoading } = useQuery({
+    queryKey: ["maintenance-locations"],
+    queryFn: () => fetchAllLocations(getToken),
+    enabled: isAdmin,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -594,7 +759,6 @@ export default function MaintenancePage() {
     () => assets.find((a) => String(a.id) === gpTicket?.assetId),
     [assets, gpTicket?.assetId],
   );
-
   const gpAssetName = React.useMemo(() => {
     if (!gpAsset) return undefined;
     const brandModel = `${gpAsset.brand ?? ""} ${gpAsset.model ?? ""}`.trim();
@@ -664,20 +828,18 @@ export default function MaintenancePage() {
     mutationFn: async () => {
       const err = validate();
       if (err) throw new Error(err);
-
       if (!editingId && hasActiveTicket(form.assetId)) {
         setDuplicateAssetId(form.assetId);
         throw new Error("duplicate");
       }
-
-      if (editingId) {
-        return updateMaintenance(getTokenRef.current, editingId, form);
-      }
-      return createMaintenance(getTokenRef.current, form);
+      return editingId
+        ? updateMaintenance(getToken, editingId, form)
+        : createMaintenance(getToken, form);
     },
     onSuccess: async (saved) => {
       await updateAssetStatus(saved.assetId, getAssetStatus(form.status));
       void qc.invalidateQueries({ queryKey: ["maintenance"] });
+      void qc.invalidateQueries({ queryKey: ["maintenance-locations"] });
       setFormOpen(false);
       setEditingId(null);
       setTechnicianType("internal");
@@ -697,17 +859,8 @@ export default function MaintenancePage() {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const existing = rows.find((x) => x.id === id);
-      await deleteMaintenance(getTokenRef.current, id);
-
+      await deleteMaintenance(getToken, id);
       if (existing?.assetId) {
-        const stillActive = rows.some(
-          (m) =>
-            m.id !== id &&
-            m.assetId === existing.assetId &&
-            m.status !== "Completed" &&
-            m.status !== "Cancelled" &&
-            m.status !== "Cannot Repair",
-        );
         const activeTicket = rows.find(
           (m) =>
             m.id !== id &&
@@ -718,9 +871,7 @@ export default function MaintenancePage() {
         );
         await updateAssetStatus(
           existing.assetId,
-          stillActive
-            ? getAssetStatus(activeTicket?.status ?? "Open")
-            : "Available",
+          activeTicket ? getAssetStatus(activeTicket.status) : "Available",
         );
       }
     },
@@ -729,9 +880,10 @@ export default function MaintenancePage() {
       toast.success("Ticket deleted");
     },
     onError: (err) => {
-      const msg =
-        err instanceof Error ? err.message : "Failed to delete ticket.";
-      toast.error("Delete failed", { description: msg });
+      toast.error("Delete failed", {
+        description:
+          err instanceof Error ? err.message : "Failed to delete ticket.",
+      });
     },
     onSettled: () => setDeleteId(null),
   });
@@ -740,11 +892,7 @@ export default function MaintenancePage() {
     mutationFn: async (id: string) => {
       const existing = rows.find((x) => x.id === id);
       if (!existing) throw new Error("Ticket not found.");
-      const updated = await markMaintenanceCompleted(
-        getTokenRef.current,
-        id,
-        existing,
-      );
+      const updated = await markMaintenanceCompleted(getToken, id, existing);
       await updateAssetStatus(existing.assetId, "Available");
       return updated;
     },
@@ -755,9 +903,10 @@ export default function MaintenancePage() {
       });
     },
     onError: (err) => {
-      const msg =
-        err instanceof Error ? err.message : "Failed to mark completed.";
-      toast.error("Action failed", { description: msg });
+      toast.error("Action failed", {
+        description:
+          err instanceof Error ? err.message : "Failed to mark completed.",
+      });
     },
   });
 
@@ -782,7 +931,14 @@ export default function MaintenancePage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Search & Filters</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
+        <CardContent
+          className={cn(
+            "grid gap-3",
+            isAdmin
+              ? "sm:grid-cols-2 md:grid-cols-4"
+              : "sm:grid-cols-2 md:grid-cols-3",
+          )}
+        >
           <div className="space-y-1 sm:col-span-2 md:col-span-1">
             <div className="text-xs text-muted-foreground">Search</div>
             <Input
@@ -791,6 +947,7 @@ export default function MaintenancePage() {
               placeholder="ticket, asset code, issue, assigned to..."
             />
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Status</div>
             <Select
@@ -812,6 +969,7 @@ export default function MaintenancePage() {
               </SelectContent>
             </Select>
           </div>
+
           <div className="space-y-1">
             <div className="text-xs text-muted-foreground">Priority</div>
             <Select
@@ -833,6 +991,18 @@ export default function MaintenancePage() {
               </SelectContent>
             </Select>
           </div>
+
+          {isAdmin && (
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Location</div>
+              <LocationCombobox
+                locations={locations}
+                value={locationFilter}
+                onChange={setLocationFilter}
+                loading={locationsLoading}
+              />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1047,20 +1217,14 @@ export default function MaintenancePage() {
         </CardContent>
       </Card>
 
-      {/* ── Add / Edit Dialog ─────────────────────────────────────────────── */}
+      {/* Add / Edit Dialog */}
       <Dialog
         open={formOpen}
         onOpenChange={(o) => {
           if (!saveMutation.isPending) setFormOpen(o);
         }}
       >
-        {/*
-          Responsive dialog:
-          - Mobile  (<sm): full viewport width, max-height with scroll
-          - Tablet+ (sm+): constrained width, natural height
-        */}
         <DialogContent className="w-full max-w-lg sm:max-w-2xl p-0 gap-0 overflow-hidden [&>button]:hidden">
-          {/* Sticky header */}
           <DialogHeader className="border-b px-4 sm:px-6 py-4 flex flex-row items-center justify-between space-y-0 shrink-0">
             <DialogTitle className="text-base font-semibold">
               {editingId ? "Edit Ticket" : "New Ticket"}
@@ -1077,7 +1241,6 @@ export default function MaintenancePage() {
             </Button>
           </DialogHeader>
 
-          {/* Scrollable body */}
           <div className="overflow-y-auto max-h-[70vh] px-4 sm:px-6 py-4 space-y-4">
             {formError && (
               <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -1085,7 +1248,6 @@ export default function MaintenancePage() {
               </div>
             )}
 
-            {/* Ticket No */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Ticket No</div>
               <Input
@@ -1095,7 +1257,6 @@ export default function MaintenancePage() {
               />
             </div>
 
-            {/* Asset */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Asset *</div>
               {editingId ? (
@@ -1110,7 +1271,6 @@ export default function MaintenancePage() {
               )}
             </div>
 
-            {/* Issue Title */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Issue Title *</div>
               <Input
@@ -1123,7 +1283,6 @@ export default function MaintenancePage() {
               />
             </div>
 
-            {/* Description */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Description</div>
               <Input
@@ -1136,7 +1295,6 @@ export default function MaintenancePage() {
               />
             </div>
 
-            {/* Priority + Status — side by side on sm+ */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Priority</div>
@@ -1185,7 +1343,6 @@ export default function MaintenancePage() {
               </div>
             </div>
 
-            {/* Reported Date + Location */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
@@ -1213,10 +1370,8 @@ export default function MaintenancePage() {
               </div>
             </div>
 
-            {/* Admin-only fields */}
             {isAdmin && (
               <>
-                {/* Due Date */}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Due Date</div>
                   <Input
@@ -1229,7 +1384,6 @@ export default function MaintenancePage() {
                   />
                 </div>
 
-                {/* Assigned To */}
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs text-muted-foreground">
@@ -1266,7 +1420,6 @@ export default function MaintenancePage() {
                   )}
                 </div>
 
-                {/* Cost */}
                 <div className="space-y-1">
                   <div className="text-xs text-muted-foreground">Cost</div>
                   <Input
@@ -1288,7 +1441,6 @@ export default function MaintenancePage() {
               </>
             )}
 
-            {/* Notes */}
             <div className="space-y-1">
               <div className="text-xs text-muted-foreground">Notes</div>
               <Input
@@ -1302,7 +1454,6 @@ export default function MaintenancePage() {
             </div>
           </div>
 
-          {/* Sticky footer */}
           <DialogFooter className="border-t px-4 sm:px-6 py-3 flex flex-row justify-end gap-2 shrink-0">
             <Button
               variant="outline"
@@ -1336,8 +1487,7 @@ export default function MaintenancePage() {
             <AlertDialogTitle>Active Ticket Already Exists</AlertDialogTitle>
             <AlertDialogDescription>
               This asset already has an open or in-progress maintenance ticket.
-              Please complete or cancel the existing ticket before creating a
-              new one.
+              Please complete or cancel it before creating a new one.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
