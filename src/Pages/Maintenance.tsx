@@ -646,10 +646,6 @@ export default function MaintenancePage() {
   const [gpTicket, setGpTicket] = React.useState<Maintenance | null>(null);
   const userLocation = (user?.publicMetadata?.location as string) ?? "";
 
-  const filteredStatusOptions = isAdmin
-    ? maintenanceStatusOptions
-    : maintenanceStatusOptions.filter((s) => s === "Open");
-
   // ── Filters ────────────────────────────────────────────────────────────────
   const [q, setQ] = React.useState("");
   const [debouncedQ, setDebouncedQ] = React.useState("");
@@ -674,18 +670,10 @@ export default function MaintenancePage() {
     setPage(0);
   }, [debouncedQ, statusFilter, priorityFilter, locationFilter]);
 
-  // ── Normalise filter values ────────────────────────────────────────────────
-  // Convert "All" → "" once here. Both queryKey and queryFn read these same
-  // variables so they can never drift apart.
   const apiStatus = statusFilter === "All" ? "" : statusFilter;
   const apiPriority = priorityFilter === "All" ? "" : priorityFilter;
-  const apiLocation = locationFilter; // "" means "all"
+  const apiLocation = locationFilter;
 
-  // ── React Query ────────────────────────────────────────────────────────────
-  // THE FIX: queryFn destructures its values directly from queryKey.
-  // React Query passes the exact key that triggered this call into queryFn,
-  // so the fetcher always receives the values that are actually in the cache
-  // key — a stale closure can never cause a mismatch.
   const {
     data: maintenancePage,
     isLoading,
@@ -754,6 +742,14 @@ export default function MaintenancePage() {
   const [duplicateAssetId, setDuplicateAssetId] = React.useState<string | null>(
     null,
   );
+
+  // ── Derived: is the ticket being edited already completed? ─────────────────
+  const isCompleted = !!editingId && form.status === "Completed";
+
+  // ── Status options: always include current status so Select renders correctly
+  const filteredStatusOptions = isAdmin
+    ? maintenanceStatusOptions
+    : maintenanceStatusOptions.filter((s) => s === "Open" || s === form.status);
 
   const gpAsset = React.useMemo(
     () => assets.find((a) => String(a.id) === gpTicket?.assetId),
@@ -1242,6 +1238,13 @@ export default function MaintenancePage() {
           </DialogHeader>
 
           <div className="overflow-y-auto max-h-[70vh] px-4 sm:px-6 py-4 space-y-4">
+            {/* Completed notice */}
+            {isCompleted && (
+              <div className="rounded-md bg-muted px-4 py-2 text-sm text-muted-foreground">
+                This ticket is completed and cannot be edited.
+              </div>
+            )}
+
             {formError && (
               <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
                 {formError}
@@ -1279,7 +1282,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, issueTitle: e.target.value }))
                 }
                 placeholder="Battery health degraded"
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || isCompleted}
               />
             </div>
 
@@ -1291,7 +1294,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, description: e.target.value }))
                 }
                 placeholder="Describe the issue briefly..."
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || isCompleted}
               />
             </div>
 
@@ -1306,7 +1309,7 @@ export default function MaintenancePage() {
                       priority: v as MaintenancePriority,
                     }))
                   }
-                  disabled={saveMutation.isPending}
+                  disabled={saveMutation.isPending || isCompleted}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -1327,9 +1330,7 @@ export default function MaintenancePage() {
                   onValueChange={(v) =>
                     setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
                   }
-                  disabled={
-                    saveMutation.isPending || form.status === "Completed"
-                  }
+                  disabled={saveMutation.isPending || isCompleted}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -1356,7 +1357,7 @@ export default function MaintenancePage() {
                   onChange={(e) =>
                     setForm((p) => ({ ...p, reportedDate: e.target.value }))
                   }
-                  disabled={saveMutation.isPending}
+                  disabled={saveMutation.isPending || isCompleted}
                 />
               </div>
               <div className="space-y-1">
@@ -1367,7 +1368,7 @@ export default function MaintenancePage() {
                     setForm((p) => ({ ...p, location: e.target.value }))
                   }
                   placeholder="Location"
-                  disabled={saveMutation.isPending || !isAdmin}
+                  disabled={saveMutation.isPending || !isAdmin || isCompleted}
                 />
               </div>
             </div>
@@ -1382,7 +1383,7 @@ export default function MaintenancePage() {
                     onChange={(e) =>
                       setForm((p) => ({ ...p, dueDate: e.target.value }))
                     }
-                    disabled={saveMutation.isPending}
+                    disabled={saveMutation.isPending || isCompleted}
                   />
                 </div>
 
@@ -1397,7 +1398,7 @@ export default function MaintenancePage() {
                         setTechnicianType(t);
                         setForm((p) => ({ ...p, assignedTo: "" }));
                       }}
-                      disabled={saveMutation.isPending}
+                      disabled={saveMutation.isPending || isCompleted}
                     />
                   </div>
                   {technicianType === "supplier" ? (
@@ -1407,7 +1408,7 @@ export default function MaintenancePage() {
                       onChange={(name) =>
                         setForm((p) => ({ ...p, assignedTo: name }))
                       }
-                      disabled={saveMutation.isPending}
+                      disabled={saveMutation.isPending || isCompleted}
                       loading={suppliersLoading}
                     />
                   ) : (
@@ -1417,7 +1418,7 @@ export default function MaintenancePage() {
                         setForm((p) => ({ ...p, assignedTo: e.target.value }))
                       }
                       placeholder="Technician name"
-                      disabled={saveMutation.isPending}
+                      disabled={saveMutation.isPending || isCompleted}
                     />
                   )}
                 </div>
@@ -1437,7 +1438,7 @@ export default function MaintenancePage() {
                       }))
                     }
                     placeholder="0"
-                    disabled={saveMutation.isPending}
+                    disabled={saveMutation.isPending || isCompleted}
                   />
                 </div>
               </>
@@ -1451,7 +1452,7 @@ export default function MaintenancePage() {
                   setForm((p) => ({ ...p, notes: e.target.value }))
                 }
                 placeholder="Extra notes..."
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || isCompleted}
               />
             </div>
           </div>
@@ -1468,7 +1469,7 @@ export default function MaintenancePage() {
             <Button
               onClick={() => saveMutation.mutate()}
               type="button"
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || isCompleted}
             >
               {saveMutation.isPending && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
