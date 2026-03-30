@@ -893,7 +893,7 @@ export default function MaintenancePage() {
       const existing = rows.find((x) => x.id === id);
       if (!existing) throw new Error("Ticket not found.");
       const updated = await markMaintenanceCompleted(getToken, id, existing);
-      await updateAssetStatus(existing.assetId, "Available");
+      await updateAssetStatus(existing.assetId, "Assigned");
       return updated;
     },
     onSuccess: (updated) => {
@@ -1235,7 +1235,7 @@ export default function MaintenancePage() {
               className="h-8 w-8 shrink-0"
               onClick={() => setFormOpen(false)}
               type="button"
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || form.status === "Completed"}
             >
               <span className="sr-only">Close</span>✕
             </Button>
