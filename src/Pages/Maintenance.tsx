@@ -1235,7 +1235,7 @@ export default function MaintenancePage() {
               className="h-8 w-8 shrink-0"
               onClick={() => setFormOpen(false)}
               type="button"
-              disabled={saveMutation.isPending || form.status === "Completed"}
+              disabled={saveMutation.isPending}
             >
               <span className="sr-only">Close</span>✕
             </Button>
@@ -1327,7 +1327,9 @@ export default function MaintenancePage() {
                   onValueChange={(v) =>
                     setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
                   }
-                  disabled={saveMutation.isPending}
+                  disabled={
+                    saveMutation.isPending || form.status === "Completed"
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue />
