@@ -223,7 +223,7 @@ function GatePassCard({
         {/* Left: Logo + Title + Location */}
         <div className="flex items-center gap-3.5">
           <img
-            src="src/assets/Logo.png"
+            src="Logo.png"
             alt="CIC Logo"
             className="h-40 shrink-0 object-contain"
           />
