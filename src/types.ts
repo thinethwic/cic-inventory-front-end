@@ -1,5 +1,4 @@
 // src/types.ts
-
 // ─── Status — mirrors backend AssetStatus enum ────────────────────────────────
 export type AssetStatus = "Available" | "Assigned" | "In Repair" | "Disposed" | "Damaged";
 
@@ -88,14 +87,15 @@ export type EntityBase = {
     createdAt?: string;
 };
 
-export type Department = EntityBase & {
+export type Location = EntityBase & {
     name: string;
     code: string;
 };
 
-export type Location = EntityBase & {
+export type Department = EntityBase & {
     name: string;
     code: string;
+    location?: Location; // ← added: returned by backend on GET
 };
 
 export type Supplier = EntityBase & {

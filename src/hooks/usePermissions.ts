@@ -9,11 +9,12 @@ export function usePermissions() {
     const role = (meta.role as string) ?? "";
     const roles = (meta.roles as string[]) ?? [];
     const location = (meta.location as string) ?? "";
+    const department = (meta.departmentName as string) ?? "";
 
     const isAdmin =
         roles.some((r) => r.toLowerCase() === "admin") ||
         role.toLowerCase() === "admin" ||
         role.toLowerCase() === "admin_user";
 
-    return { role, roles, isAdmin, location };
+    return { role, roles, isAdmin, location, department };
 }

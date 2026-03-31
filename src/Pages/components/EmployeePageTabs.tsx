@@ -856,7 +856,6 @@ export function EmployeesTab({
                 />
               </div>
 
-              {/* Department — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <FieldLabel>Department *</FieldLabel>
                 <DepartmentCombobox
@@ -867,7 +866,6 @@ export function EmployeesTab({
                 />
               </div>
 
-              {/* Location — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <FieldLabel>Location *</FieldLabel>
                 <LocationCombobox
@@ -922,7 +920,11 @@ export function EmployeesTab({
           <DialogFooter className="shrink-0 gap-2 border-t px-6 py-4">
             <Button
               variant="outline"
-              onClick={() => setOpenForm(false)}
+              onClick={() => {
+                setOpenForm(false);
+                setEditing(null);
+                setForm(blankForm());
+              }}
               type="button"
               disabled={saving}
             >
@@ -983,6 +985,7 @@ export function SuppliersTab({
     setForm(blank);
     setOpenForm(true);
   };
+
   const openEdit = (s: Supplier) => {
     setEditing(s);
     setForm({ name: s.name, phone_no: s.phone_no ?? "", email: s.email ?? "" });
@@ -1001,6 +1004,8 @@ export function SuppliersTab({
         setSuppliers((p) => [created, ...p]);
       }
       setOpenForm(false);
+      setEditing(null);
+      setForm(blank); // ← reset form after save
     } catch (e) {
       alert(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -1138,7 +1143,11 @@ export function SuppliersTab({
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setOpenForm(false)}
+              onClick={() => {
+                setOpenForm(false);
+                setEditing(null);
+                setForm(blank); // ← reset on cancel too
+              }}
               type="button"
               disabled={saving}
             >
@@ -1160,7 +1169,7 @@ export function SuppliersTab({
 export interface DepartmentsTabProps {
   departments: Department[];
   setDepartments: React.Dispatch<React.SetStateAction<Department[]>>;
-  locations: Location[]; // ← NEW: needed to associate a location FK
+  locations: Location[];
   loading: boolean;
   onDelete: (id: number, label: string) => void;
 }
@@ -1217,7 +1226,8 @@ export function DepartmentsTab({
     setForm({
       name: d.name,
       code: d.code,
-      locationId: String((d as any).location?.id ?? locations[0]?.id ?? ""),
+      // ← no more `as any` — location is now typed on Department
+      locationId: String(d.location?.id ?? locations[0]?.id ?? ""),
     });
     setOpenForm(true);
   };
@@ -1243,6 +1253,8 @@ export function DepartmentsTab({
         setDepartments((p) => [created, ...p]);
       }
       setOpenForm(false);
+      setEditing(null);
+      setForm(blankForm()); // ← reset form after save
     } catch (e) {
       alert(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -1301,7 +1313,6 @@ export function DepartmentsTab({
                   <TableHead>Name</TableHead>
                   <TableHead>Code</TableHead>
                   <TableHead>Location</TableHead>
-                  {/* ← NEW column */}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1318,8 +1329,8 @@ export function DepartmentsTab({
                         {d.code}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {/* ← NEW cell: show the location name */}
-                        {(d as any).location?.name ?? "-"}
+                        {/* ← no more `as any` cast */}
+                        {d.location?.name ?? "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <ActionMenu
@@ -1348,7 +1359,6 @@ export function DepartmentsTab({
         </CardContent>
       </Card>
 
-      {/* Form Dialog */}
       <Dialog open={openForm} onOpenChange={(o) => !saving && setOpenForm(o)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -1374,7 +1384,6 @@ export function DepartmentsTab({
                 disabled={saving}
               />
             </div>
-            {/* ← NEW: Location searchable combobox */}
             <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
               <FieldLabel>Location *</FieldLabel>
               <LocationCombobox
@@ -1388,7 +1397,11 @@ export function DepartmentsTab({
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setOpenForm(false)}
+              onClick={() => {
+                setOpenForm(false);
+                setEditing(null);
+                setForm(blankForm()); // ← reset on cancel
+              }}
               type="button"
               disabled={saving}
             >
@@ -1445,6 +1458,7 @@ export function LocationsTab({
     setForm(blank);
     setOpenForm(true);
   };
+
   const openEdit = (l: Location) => {
     setEditing(l);
     setForm({ name: l.name, code: l.code });
@@ -1464,6 +1478,8 @@ export function LocationsTab({
         setLocations((p) => [created, ...p]);
       }
       setOpenForm(false);
+      setEditing(null);
+      setForm(blank); // ← reset form after save
     } catch (e) {
       alert(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -1592,7 +1608,11 @@ export function LocationsTab({
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setOpenForm(false)}
+              onClick={() => {
+                setOpenForm(false);
+                setEditing(null);
+                setForm(blank); // ← reset on cancel
+              }}
               type="button"
               disabled={saving}
             >
