@@ -24,10 +24,14 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 
+import { hasRole } from "@/utils/permissions";
+import { usePermissions } from "@/hooks/usePermissions";
+
 /* ================= TYPES ================= */
 
 type Role = "admin" | "admin_user" | "user";
 type UserLocation = string;
+type UserDepartment = string;
 type NavItem = {
   to: string;
   label: string;
@@ -85,16 +89,20 @@ const navItems: NavItem[] = [
 /* ================= COMPONENT ================= */
 
 export default function AppSidebar() {
+  const { roles } = usePermissions();
+  const isAdmin = hasRole(roles, ["admin", "admin_user"]);
   const { user } = useUser();
   const location = useLocation();
 
+  // 🔐 Get role + department from Clerk metadata
   // 🔐 Get role + department from Clerk metadata
   const role = user?.publicMetadata?.role as Role | undefined;
   const Userlocation = user?.publicMetadata?.location as
     | UserLocation
     | undefined;
-
-  // 🧠 Permission check
+  const UserDepartment = user?.publicMetadata?.departmentName as
+    | UserDepartment
+    | undefined; // ← FIX: was reading location
   const canAccess = (item: NavItem) => {
     const roleMatch = !item.roles || (role && item.roles.includes(role));
 
@@ -167,6 +175,11 @@ export default function AppSidebar() {
             <div className="truncate text-xs text-muted-foreground">
               {Userlocation ?? "location"}
             </div>
+            {isAdmin && (
+              <div className="truncate text-xs text-muted-foreground">
+                {UserDepartment ?? "No department"}
+              </div>
+            )}
 
             <div className="text-xs text-muted-foreground truncate">
               Version 1.1.5
