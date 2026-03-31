@@ -172,7 +172,7 @@ export default function AppSidebar() {
             <div className="truncate text-xs text-muted-foreground">
               {Userlocation ?? "location"}
             </div>
-            {isAdmin && (
+            {!isAdmin && (
               <div className="truncate text-xs text-muted-foreground">
                 {UserDepartment ?? "No department"}
               </div>
