@@ -89,27 +89,24 @@ const navItems: NavItem[] = [
 /* ================= COMPONENT ================= */
 
 export default function AppSidebar() {
-  const { roles } = usePermissions();
-  const isAdmin = hasRole(roles, ["admin", "admin_user"]);
+  const { role } = usePermissions();
+  const isAdmin = hasRole(role, ["admin", "admin_user"]);
   const { user } = useUser();
   const location = useLocation();
 
-  // 🔐 Get role + department from Clerk metadata
-  // 🔐 Get role + department from Clerk metadata
-  const role = user?.publicMetadata?.role as Role | undefined;
+  // 🔐 Get extra metadata from Clerk (role already comes from usePermissions)
+  const metaRole = user?.publicMetadata?.role as Role | undefined;
   const Userlocation = user?.publicMetadata?.location as
     | UserLocation
     | undefined;
   const UserDepartment = user?.publicMetadata?.departmentName as
     | UserDepartment
-    | undefined; // ← FIX: was reading location
-  const canAccess = (item: NavItem) => {
-    const roleMatch = !item.roles || (role && item.roles.includes(role));
+    | undefined;
 
-    return roleMatch;
+  const canAccess = (item: NavItem) => {
+    return !item.roles || (role && item.roles.includes(role as Role));
   };
 
-  // 🎯 Filter sidebar items
   const filteredNavItems = navItems.filter(canAccess);
 
   return (
@@ -169,7 +166,7 @@ export default function AppSidebar() {
 
             {/* 🔥 Show role + department */}
             <div className="truncate text-xs text-muted-foreground">
-              {role ?? "role"}
+              {metaRole ?? "role"}
             </div>
 
             <div className="truncate text-xs text-muted-foreground">
