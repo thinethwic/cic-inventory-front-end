@@ -15,8 +15,7 @@ export default function LoginPage() {
 
         <div className="bg-white border rounded-2xl shadow-sm p-4">
           <SignIn
-            routing="path"
-            path="/login"
+            routing="virtual"
             signUpUrl="/signup"
             afterSignInUrl="/"
             appearance={{

@@ -5,11 +5,13 @@ import * as XLSX from "xlsx";
 import type { Asset } from "@/types";
 import type { Maintenance } from "@/types";
 
+import logo from "@/assets/Logo.png";
+
 /* ─────────────────────────────────────────────────────────────────────────── */
 /* Constants                                                                    */
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-const LOGO_PATH = "/Logo.png";
+const LOGO_PATH = logo;
 const COMPANY_NAME = "CIC Feeds Groups - Asset Inventory";
 
 /* ─────────────────────────────────────────────────────────────────────────── */
@@ -56,27 +58,27 @@ function addReportHeader(
 
     // Logo — top-right corner
     if (logoDataURL) {
-        const logoW = 40;
-        const logoH = 14;
-        doc.addImage(logoDataURL, "PNG", pageWidth - logoW - 14, 12, logoW, logoH);
+        const logoW = 60;
+        const logoH = 55;
+        doc.addImage(logoDataURL, "PNG", pageWidth - logoW - 12, 2, logoW, logoH);
     }
 
     // Title & meta — left side
-    doc.setFontSize(18);
-    doc.text(title, 14, 20);
+    doc.setFontSize(16);        // was 18
+    doc.text(title, 14, 18);    // was y:20
 
     doc.setFontSize(10);
-    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 28);
+    doc.text(`Generated: ${new Date().toLocaleDateString()}`, 14, 26);  // was y:28
 
     if (subtitle) {
         doc.setFontSize(9);
         doc.setTextColor(100);
-        doc.text(subtitle, 14, 35);
+        doc.text(subtitle, 14, 33);   // was y:35
         doc.setTextColor(0);
-        return 42;
+        return 40;                    // was 42
     }
 
-    return 35;
+    return 33;  // was 35
 }
 
 /** Download a workbook as .xlsx */
