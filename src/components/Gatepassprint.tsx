@@ -60,6 +60,14 @@ function usePrintStyle(printId: string) {
           box-sizing: border-box;
         }
         #${printId}-portal > * { width: 100% !important; max-width: 100% !important; }
+        #${printId}-portal .gp-card {
+          width: 100% !important;
+          max-width: none !important;
+          box-sizing: border-box !important;
+        }
+        #${printId}-portal .gp-fields {
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        }
       }
     `;
     document.head.appendChild(el);
@@ -133,21 +141,21 @@ function SignatureBlock({
 }) {
   return (
     <div
-      className="rounded-b-sm px-2 pb-2 pt-1"
+      className="rounded-b-sm px-3 pb-3 pt-2 sm:px-2 sm:pb-2 sm:pt-1"
       style={{
         borderTop: `2px solid ${accentHex}`,
         background: `${accentHex}0a`,
       }}
     >
       <p
-        className="text-[7.5px] font-bold uppercase tracking-[0.15em] m-0"
+        className="m-0 text-[9px] font-bold uppercase tracking-[0.15em] sm:text-[7.5px]"
         style={{ color: accentHex }}
       >
         {label}
       </p>
 
       {isFirst && createdBy && (
-        <p className="text-[9px] font-bold text-[#1a1a1a] mt-1 mb-0">
+        <p className="mb-0 mt-1 text-xs font-bold text-[#1a1a1a] sm:text-[9px]">
           {createdBy}
         </p>
       )}
@@ -156,7 +164,7 @@ function SignatureBlock({
         className="border-b border-[#ccc] pb-0.5"
         style={{ marginTop: isFirst && createdBy ? 6 : 18 }}
       />
-      <p className="text-[7.5px] text-[#bbb] mt-0.5">
+      <p className="mt-0.5 text-[9px] text-[#777] sm:text-[7.5px] sm:text-[#bbb]">
         {isFirst && createdBy ? "Signature / Date" : "Name / Signature / Date"}
       </p>
     </div>
@@ -186,7 +194,7 @@ function GatePassCard({
   return (
     <div
       id={printId}
-      className="relative w-2xl overflow-hidden rounded-[4px] text-[#1a1a1a]"
+      className="gp-card relative mx-auto box-border w-full max-w-full overflow-hidden rounded-[4px] text-[#1a1a1a]"
       style={{
         fontFamily: "'Segoe UI', Arial, sans-serif",
         background: "#fff",
@@ -200,7 +208,7 @@ function GatePassCard({
         className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center"
       >
         <span
-          className="select-none whitespace-nowrap text-[90px] font-black uppercase tracking-[0.12em]"
+          className="select-none whitespace-nowrap text-5xl font-black uppercase tracking-[0.12em] sm:text-[72px] lg:text-[90px]"
           style={{
             color: "rgba(0,0,0,0.03)",
             transform: "rotate(-22deg)",
@@ -216,34 +224,34 @@ function GatePassCard({
 
       {/* Header */}
       <div
-        className="relative z-10 flex min-h-[40px] items-center justify-between border-b px-5 py-2.5"
+        className="relative z-10 flex min-h-[40px] flex-col gap-4 border-b px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between lg:gap-6 lg:py-2.5"
         style={{
           borderColor: `${accentHex}22`,
           background: `${accentHex}08`,
         }}
       >
         {/* Left: Logo + Title + Location */}
-        <div className="flex items-center gap-3.5">
+        <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-3.5 lg:flex-1">
           <img
             src={logo}
             alt="CIC Logo"
-            className="h-40 shrink-0 object-contain"
+            className="h-16 w-auto max-w-[140px] shrink-0 object-contain sm:h-20 sm:max-w-[180px] lg:h-28 lg:max-w-[240px]"
           />
 
           <div
-            className="h-14 w-px shrink-0 rounded-sm"
+            className="hidden h-14 w-px shrink-0 rounded-sm sm:block"
             style={{ background: `${accentHex}30` }}
           />
 
-          <div className="flex text-left gap-3.5">
+          <div className="flex min-w-0 flex-col gap-1 text-left sm:gap-1.5 lg:flex-row lg:items-baseline lg:gap-3.5">
             <h2
-              className="m-0 text-xl font-extrabold  tracking-[0.04em] leading-none"
+              className="m-0 break-words text-xl font-extrabold leading-tight tracking-[0.04em] sm:text-2xl lg:text-xl"
               style={{ color: accentHex }}
             >
               {title}
             </h2>
             {location && (
-              <p className="mt-[3px] mb-0 text-[11px] font-semibold tracking-[0.08em] text-[#555]">
+              <p className="mb-0 mt-[3px] break-words text-[11px] font-semibold tracking-[0.08em] text-[#555]">
                 Location: {location}
               </p>
             )}
@@ -251,20 +259,26 @@ function GatePassCard({
         </div>
 
         {/* Right: Ref badge + Completed stamp */}
-        <div className="flex flex-col items-end gap-1.5">
+        <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:max-w-[45%] sm:items-end sm:gap-1.5">
           <div
-            className="rounded px-3.5 py-1.5 text-left"
+            className="w-full max-w-full rounded px-3.5 py-2 text-left sm:py-1.5"
             style={{ background: accentHex }}
           >
             <p
-              className="m-0 text-2xl font-black tracking-[0.08em] text-shadow-neutral-400"
-              style={{ fontFamily: "'Courier New', Courier, monospace" }}
+              className="m-0 break-all text-xl font-black tracking-[0.08em] text-white sm:text-2xl"
+              style={{
+                fontFamily: "'Courier New', Courier, monospace",
+                overflowWrap: "anywhere",
+              }}
             >
               {refNo}
             </p>
             <p
-              className="m-0 mt-[3px] text-[20px] text-left text-white/70"
-              style={{ fontFamily: "'Courier New', Courier, monospace" }}
+              className="m-0 mt-[3px] text-left text-xs text-white/70 sm:text-[20px]"
+              style={{
+                fontFamily: "'Courier New', Courier, monospace",
+                overflowWrap: "anywhere",
+              }}
             >
               {stamp}
             </p>
@@ -276,7 +290,10 @@ function GatePassCard({
               <div>
                 <p
                   className="m-0 text-[8px] font-extrabold uppercase tracking-[0.15em] text-green-700"
-                  style={{ fontFamily: "'Courier New', Courier, monospace" }}
+                  style={{
+                    fontFamily: "'Courier New', Courier, monospace",
+                    overflowWrap: "anywhere",
+                  }}
                 >
                   Completed
                 </p>
@@ -287,25 +304,31 @@ function GatePassCard({
       </div>
 
       {/* Fields grid */}
-      <div className="relative z-10 grid grid-cols-3 gap-x-2 px-5 pt-2 pb-1">
+      <div className="gp-fields relative z-10 grid grid-cols-1 gap-x-3 px-4 pb-2 pt-2 sm:grid-cols-2 sm:px-5 lg:grid-cols-3">
         {fields.map((f) => (
           <div
             key={f.label}
-            className="border-b border-dashed border-[#e0e0e0] py-[5px]"
-            style={{ gridColumn: `span ${f.span ?? 1}` }}
+            className={`border-b border-dashed border-[#e0e0e0] py-2 sm:py-[5px] ${
+              f.span === 3
+                ? "sm:col-span-2 lg:col-span-3"
+                : f.span === 2
+                  ? "sm:col-span-2"
+                  : ""
+            }`}
           >
-            <p className="m-0 text-[7.5px] font-bold uppercase tracking-[0.18em] text-[#aaa]">
+            <p className="m-0 text-[8.5px] font-bold uppercase tracking-[0.18em] text-[#777] sm:text-[7.5px] sm:text-[#aaa]">
               {f.label}
             </p>
             <p
-              className="m-0 mt-0.5 text-[11.5px] font-bold text-[#1a1a1a]"
+              className="m-0 mt-0.5 break-words text-sm font-bold text-[#1a1a1a] sm:text-[11.5px]"
               style={{
                 fontFamily: f.mono
                   ? "'Courier New', Courier, monospace"
                   : "inherit",
-                whiteSpace: f.span === 3 ? "normal" : "nowrap",
+                whiteSpace: "normal",
                 overflow: "hidden",
-                textOverflow: f.span === 3 ? "clip" : "ellipsis",
+                textOverflow: "clip",
+                overflowWrap: "anywhere",
               }}
             >
               {f.value || "—"}
@@ -315,7 +338,7 @@ function GatePassCard({
       </div>
 
       {/* Signature strip */}
-      <div className="relative z-10 mx-5 mt-2.5 mb-1.5 grid grid-cols-3 gap-3">
+      <div className="relative z-10 mx-4 mb-2 mt-3 grid grid-cols-1 gap-3 sm:mx-5 sm:mb-1.5 sm:mt-2.5 sm:grid-cols-3">
         {signatureLabels.map((label, i) => (
           <SignatureBlock
             key={label}
@@ -329,14 +352,14 @@ function GatePassCard({
 
       {/* Footer bar */}
       <div
-        className="mt-1 flex items-center justify-between px-5 py-1.5"
+        className="mt-1 flex flex-col gap-1 px-4 py-2 text-center sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-1.5 sm:text-left"
         style={{ background: accentHex }}
       >
-        <p className="m-0 text-[8.5px] font-semibold text-white/90">
+        <p className="m-0 text-[10px] font-semibold text-white/90 sm:text-[8.5px]">
           {footerNote}
         </p>
         <p
-          className="m-0 text-[8px] tracking-[0.1em] text-white/50"
+          className="m-0 text-[9px] tracking-[0.1em] text-white/60 sm:text-[8px] sm:text-white/50"
           style={{ fontFamily: "'Courier New', Courier, monospace" }}
         >
           CONFIDENTIAL
@@ -356,9 +379,9 @@ function GatePassFooter({
   printId: string;
 }) {
   return (
-    <div className="flex items-center justify-between border-t bg-background px-6 py-3">
+    <div className="flex flex-col gap-3 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
       <p className="text-xs text-muted-foreground">Prints to A4 landscape</p>
-      <div className="flex gap-2">
+      <div className="flex flex-col-reverse gap-2 sm:flex-row">
         <Button variant="outline" onClick={onClose} type="button">
           Close
         </Button>
@@ -410,9 +433,9 @@ export function AssetGatePass({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[98vw] max-w-6xl p-0 gap-0 overflow-hidden [&>button]:hidden">
-        <DialogHeader className="border-b px-6 py-4 flex flex-row items-center justify-between space-y-0">
-          <DialogTitle className="text-base font-semibold">
+      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-6xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
+        <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-4 sm:px-6">
+          <DialogTitle className="min-w-0 truncate text-sm font-semibold sm:text-base">
             Gate Pass — {asset.assetCode}
           </DialogTitle>
           <Button
@@ -426,7 +449,7 @@ export function AssetGatePass({
           </Button>
         </DialogHeader>
 
-        <div className="overflow-auto p-6 bg-muted/40">
+        <div className="flex-1 overflow-auto bg-muted/40 p-3 sm:p-6">
           <GatePassCard
             title="Gate Pass"
             location={asset.location ?? undefined}
@@ -505,9 +528,9 @@ export function MaintenanceGatePass({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="w-[95vw] max-w-4xl p-0 gap-0 overflow-hidden [&>button]:hidden">
-        <DialogHeader className="border-b px-6 py-4 flex flex-row items-center justify-between space-y-0">
-          <DialogTitle className="text-base font-semibold">
+      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
+        <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-4 sm:px-6">
+          <DialogTitle className="min-w-0 truncate text-sm font-semibold sm:text-base">
             Maintenance Gate Pass — {m.ticketNo}
           </DialogTitle>
           <Button
@@ -521,7 +544,7 @@ export function MaintenanceGatePass({
           </Button>
         </DialogHeader>
 
-        <div className="overflow-auto p-6 bg-muted/40">
+        <div className="flex-1 overflow-auto bg-muted/40 p-3 sm:p-6">
           <GatePassCard
             title="Maintenance Gate Pass"
             location={resolvedLocation !== "—" ? resolvedLocation : undefined}

@@ -112,12 +112,20 @@ export default function AppSidebar() {
   return (
     <Sidebar collapsible="offcanvas" className="hidden md:flex">
       {/* ================= HEADER ================= */}
-      <SidebarHeader>
-        <div className="flex items-center gap-3 px-2 py-2">
-          <img src={logo} alt="CIC Logo" className="h-10 w-10 object-contain" />
+      <SidebarHeader className="border-b border-sidebar-border/80 p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-white/95 p-1 shadow-sm">
+            <img
+              src={logo}
+              alt="CIC Logo"
+              className="h-full w-full object-contain"
+            />
+          </div>
           <div className="leading-tight">
-            <div className="font-semibold">Asset Management</div>
-            <div className="text-xs text-muted-foreground">
+            <div className="font-semibold tracking-normal">
+              Asset Management
+            </div>
+            <div className="text-xs text-sidebar-foreground/60">
               CIC Feeds PVT LTD
             </div>
           </div>
@@ -125,8 +133,8 @@ export default function AppSidebar() {
       </SidebarHeader>
 
       {/* ================= MENU ================= */}
-      <SidebarContent>
-        <SidebarMenu>
+      <SidebarContent className="px-3 py-4">
+        <SidebarMenu className="gap-1.5">
           {filteredNavItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.to;
@@ -137,8 +145,9 @@ export default function AppSidebar() {
                   asChild
                   isActive={active}
                   tooltip={item.label}
+                  className="h-10 rounded-lg px-3 text-sidebar-foreground/80 data-[active=true]:bg-sidebar-primary data-[active=true]:text-sidebar-primary-foreground data-[active=true]:shadow-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 >
-                  <NavLink to={item.to} className="flex items-center gap-2">
+                  <NavLink to={item.to} className="flex items-center gap-3">
                     <Icon className="h-4 w-4" />
                     <span>{item.label}</span>
                   </NavLink>
@@ -150,8 +159,8 @@ export default function AppSidebar() {
       </SidebarContent>
 
       {/* ================= FOOTER ================= */}
-      <SidebarFooter>
-        <div className="flex items-center gap-3 px-2 py-2">
+      <SidebarFooter className="border-t border-sidebar-border/80 p-4">
+        <div className="flex items-center gap-3 rounded-lg bg-sidebar-accent/55 p-3">
           <UserButton
             appearance={{
               elements: { avatarBox: "h-9 w-9" },
@@ -160,26 +169,26 @@ export default function AppSidebar() {
           />
 
           <div className="min-w-0">
-            <div className="truncate text-sm font-medium">
+            <div className="truncate text-sm font-medium text-sidebar-foreground">
               {user?.fullName ?? "User"}
             </div>
 
             {/* 🔥 Show role + department */}
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="truncate text-xs text-sidebar-foreground/60">
               {metaRole ?? "role"}
             </div>
 
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="truncate text-xs text-sidebar-foreground/60">
               {Userlocation ?? "location"}
             </div>
             {!isAdmin && (
-              <div className="truncate text-xs text-muted-foreground">
+              <div className="truncate text-xs text-sidebar-foreground/60">
                 {UserDepartment ?? "No department"}
               </div>
             )}
 
-            <div className="text-xs text-muted-foreground truncate">
-              Version 1.1.5
+            <div className="truncate text-xs text-sidebar-foreground/50">
+              Version 2.0.0
             </div>
           </div>
         </div>

@@ -76,6 +76,154 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-xs text-muted-foreground">{children}</div>;
 }
 
+function FilterSearchInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="pl-9"
+      />
+    </div>
+  );
+}
+
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
+function SearchableFilterSelect({
+  value,
+  onValueChange,
+  options,
+  allLabel,
+  searchPlaceholder,
+}: {
+  value: string;
+  onValueChange: (value: string) => void;
+  options: FilterOption[];
+  allLabel: string;
+  searchPlaceholder: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const filtered = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(q));
+  }, [options, search]);
+
+  const selected = options.find((option) => option.value === value);
+  const displayLabel =
+    value === "All" ? allLabel : (selected?.label ?? allLabel);
+
+  React.useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 50);
+    else setSearch("");
+  }, [open]);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          type="button"
+          className="w-full justify-between font-normal"
+        >
+          <span className="truncate text-sm">{displayLabel}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+        sideOffset={4}
+      >
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={searchPlaceholder}
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto py-1">
+          <button
+            type="button"
+            onClick={() => {
+              onValueChange("All");
+              setOpen(false);
+            }}
+            className={cn(
+              "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+              value === "All" && "bg-accent",
+            )}
+          >
+            <Check
+              className={cn(
+                "h-4 w-4 shrink-0",
+                value === "All" ? "opacity-100 text-primary" : "opacity-0",
+              )}
+            />
+            <span className="font-medium text-foreground">{allLabel}</span>
+          </button>
+
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No results found.
+            </div>
+          ) : (
+            filtered.map((option) => {
+              const isSelected = value === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    onValueChange(option.value);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent",
+                    isSelected && "bg-accent",
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      isSelected ? "opacity-100 text-primary" : "opacity-0",
+                    )}
+                  />
+                  <span className="truncate font-medium text-foreground">
+                    {option.label}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function ActionMenu({
   onEdit,
   onDelete,
@@ -595,6 +743,24 @@ export function EmployeesTab({
   const { page, setPage, pageSize, setPageSize, totalPages, paged } =
     usePagination(filtered, [q, deptFilter, locFilter, statusFilter]);
 
+  const departmentFilterOptions = React.useMemo(
+    () =>
+      departments.map((d) => ({
+        value: String(d.id),
+        label: d.name,
+      })),
+    [departments],
+  );
+
+  const locationFilterOptions = React.useMemo(
+    () =>
+      locations.map((l) => ({
+        value: String(l.id),
+        label: l.name,
+      })),
+    [locations],
+  );
+
   const openAdd = () => {
     setEditing(null);
     setForm(blankForm());
@@ -662,8 +828,10 @@ export function EmployeesTab({
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <CardTitle className="text-base">Employees</CardTitle>
-              <FieldLabel>Employees used for asset assignment</FieldLabel>
+              <CardTitle className="text-base">Search & Filters</CardTitle>
+              <FieldLabel>
+                Filter employee records by assignment data
+              </FieldLabel>
             </div>
             <Button
               onClick={openAdd}
@@ -676,48 +844,36 @@ export function EmployeesTab({
           </div>
         </CardHeader>
 
-        <CardContent className="grid gap-3 md:grid-cols-4">
+        <CardContent className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1 md:col-span-2">
             <FieldLabel>Search</FieldLabel>
-            <Input
+            <FilterSearchInput
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={setQ}
               placeholder="emp id, name, email…"
             />
           </div>
 
           <div className="space-y-1">
             <FieldLabel>Department</FieldLabel>
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All</SelectItem>
-                {departments.map((d) => (
-                  <SelectItem key={d.id} value={String(d.id)}>
-                    {d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableFilterSelect
+              value={deptFilter}
+              onValueChange={setDeptFilter}
+              options={departmentFilterOptions}
+              allLabel="All Departments"
+              searchPlaceholder="Search departments..."
+            />
           </div>
 
           <div className="space-y-1">
             <FieldLabel>Location</FieldLabel>
-            <Select value={locFilter} onValueChange={setLocFilter}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="All">All</SelectItem>
-                {locations.map((l) => (
-                  <SelectItem key={l.id} value={String(l.id)}>
-                    {l.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableFilterSelect
+              value={locFilter}
+              onValueChange={setLocFilter}
+              options={locationFilterOptions}
+              allLabel="All Locations"
+              searchPlaceholder="Search locations..."
+            />
           </div>
 
           <div className="space-y-1">
@@ -1022,8 +1178,8 @@ export function SuppliersTab({
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <CardTitle className="text-base">Suppliers</CardTitle>
-              <FieldLabel>Vendors for purchasing and maintenance</FieldLabel>
+              <CardTitle className="text-base">Search & Filters</CardTitle>
+              <FieldLabel>Filter supplier records</FieldLabel>
             </div>
             <Button
               onClick={openAdd}
@@ -1035,12 +1191,12 @@ export function SuppliersTab({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="max-w-sm space-y-1">
+        <CardContent className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1 sm:col-span-2">
             <FieldLabel>Search</FieldLabel>
-            <Input
+            <FilterSearchInput
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={setQ}
               placeholder="name, phone, email…"
             />
           </div>
@@ -1271,8 +1427,8 @@ export function DepartmentsTab({
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <CardTitle className="text-base">Departments</CardTitle>
-              <FieldLabel>Used for employee grouping and reporting</FieldLabel>
+              <CardTitle className="text-base">Search & Filters</CardTitle>
+              <FieldLabel>Filter department records</FieldLabel>
             </div>
             <Button
               onClick={openAdd}
@@ -1284,12 +1440,12 @@ export function DepartmentsTab({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="max-w-sm space-y-1">
+        <CardContent className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1 sm:col-span-2">
             <FieldLabel>Search</FieldLabel>
-            <Input
+            <FilterSearchInput
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={setQ}
               placeholder="name, code…"
             />
           </div>
@@ -1496,8 +1652,8 @@ export function LocationsTab({
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <CardTitle className="text-base">Locations</CardTitle>
-              <FieldLabel>Offices/branches where assets are stored</FieldLabel>
+              <CardTitle className="text-base">Search & Filters</CardTitle>
+              <FieldLabel>Filter location records</FieldLabel>
             </div>
             <Button
               onClick={openAdd}
@@ -1509,12 +1665,12 @@ export function LocationsTab({
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="max-w-sm space-y-1">
+        <CardContent className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="space-y-1 sm:col-span-2">
             <FieldLabel>Search</FieldLabel>
-            <Input
+            <FilterSearchInput
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={setQ}
               placeholder="name, code…"
             />
           </div>

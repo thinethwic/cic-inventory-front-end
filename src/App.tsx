@@ -1,28 +1,56 @@
+import { Suspense, lazy, type ReactNode } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-
-import LoginPage from "./Pages/LoginPage";
-import SignUpPage from "./Pages/SignUpPage";
 
 import DashboardLayout from "./components/DashboardLayout";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
-import AdminOnlyRoute from "./components/AdminOnlyRoute"; // ← ADD
+import AdminOnlyRoute from "./components/AdminOnlyRoute";
 
-import Dashboard from "./Pages/DashboardPage";
-import Assets from "./Pages/Assets";
-import EmployeesPage from "./Pages/Employees";
-import MaintenancePage from "./Pages/Maintenance";
-import ReportsPage from "./Pages/Reports";
-import AssetTransfer from "./Pages/AssetTransfer";
-import UnderConstructionPage from "./Pages/components/UnderConstructionPage";
+const LoginPage = lazy(() => import("./Pages/LoginPage"));
+const SignUpPage = lazy(() => import("./Pages/SignUpPage"));
+const Dashboard = lazy(() => import("./Pages/DashboardPage"));
+const Assets = lazy(() => import("./Pages/Assets"));
+const EmployeesPage = lazy(() => import("./Pages/Employees"));
+const MaintenancePage = lazy(() => import("./Pages/Maintenance"));
+const ReportsPage = lazy(() => import("./Pages/Reports"));
+const AssetTransfer = lazy(() => import("./Pages/AssetTransfer"));
+const UnderConstructionPage = lazy(
+  () => import("./Pages/components/UnderConstructionPage"),
+);
+
+function PageLoader() {
+  return (
+    <div className="flex min-h-[240px] items-center justify-center text-sm text-muted-foreground">
+      Loading...
+    </div>
+  );
+}
+
+function LazyPage({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<PageLoader />}>{children}</Suspense>;
+}
 
 export default function App() {
   return (
     <Routes>
       {/* Public */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignUpPage />} />
+      <Route
+        path="/login"
+        element={
+          <LazyPage>
+            <LoginPage />
+          </LazyPage>
+        }
+      />
+      <Route
+        path="/signup"
+        element={
+          <LazyPage>
+            <SignUpPage />
+          </LazyPage>
+        }
+      />
 
-      {/* Protected Layout — all logged-in roles */}
+      {/* Protected Layout: all logged-in roles */}
       <Route
         path="/"
         element={
@@ -32,17 +60,47 @@ export default function App() {
         }
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="assets" element={<Assets />} />
-        <Route path="maintenance" element={<MaintenancePage />} />
-        <Route path="settings" element={<UnderConstructionPage />} />
+        <Route
+          path="dashboard"
+          element={
+            <LazyPage>
+              <Dashboard />
+            </LazyPage>
+          }
+        />
+        <Route
+          path="assets"
+          element={
+            <LazyPage>
+              <Assets />
+            </LazyPage>
+          }
+        />
+        <Route
+          path="maintenance"
+          element={
+            <LazyPage>
+              <MaintenancePage />
+            </LazyPage>
+          }
+        />
+        <Route
+          path="settings"
+          element={
+            <LazyPage>
+              <UnderConstructionPage />
+            </LazyPage>
+          }
+        />
 
         {/* Admin-only routes */}
         <Route
           path="employees"
           element={
             <AdminOnlyRoute>
-              <EmployeesPage />
+              <LazyPage>
+                <EmployeesPage />
+              </LazyPage>
             </AdminOnlyRoute>
           }
         />
@@ -50,7 +108,9 @@ export default function App() {
           path="reports"
           element={
             <AdminOnlyRoute>
-              <ReportsPage />
+              <LazyPage>
+                <ReportsPage />
+              </LazyPage>
             </AdminOnlyRoute>
           }
         />
@@ -58,7 +118,9 @@ export default function App() {
           path="assetTransfer"
           element={
             <AdminOnlyRoute>
-              <AssetTransfer />
+              <LazyPage>
+                <AssetTransfer />
+              </LazyPage>
             </AdminOnlyRoute>
           }
         />
