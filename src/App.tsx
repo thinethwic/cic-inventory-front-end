@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "./components/DashboardLayout";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
 import AdminOnlyRoute from "./components/AdminOnlyRoute";
+import { usePageTitle } from "./hooks/usePageTitle";
 
 const LoginPage = lazy(() => import("./Pages/LoginPage"));
 const SignUpPage = lazy(() => import("./Pages/SignUpPage"));
@@ -30,6 +31,7 @@ function LazyPage({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  usePageTitle();
   return (
     <Routes>
       {/* Public */}
