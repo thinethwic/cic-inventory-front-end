@@ -5,6 +5,9 @@ const ROUTE_TITLES: Record<string, string> = {
     "/dashboard": "Dashboard",  // ← updated
     "/assets": "Assets",
     "/maintenance": "Maintenance",
+    "/employees": "Management",
+    "/reports": "Reports",
+    "/assetTransfer": "Asset Transfer",
     "/settings": "Settings",
     "/login": "Login",
     "/signup": "SignUp"
