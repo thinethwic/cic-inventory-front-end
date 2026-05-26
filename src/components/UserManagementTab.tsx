@@ -1,5 +1,15 @@
 import * as React from "react";
-import { Loader2, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -53,6 +63,7 @@ type Props = {
 type FormState = UserPayload;
 
 const ROLE_OPTIONS: InventoryUserRole[] = ["admin", "admin_user", "user"];
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 const blankForm: FormState = {
   firstName: "",
@@ -74,7 +85,11 @@ export default function UserManagementTab({
   onDelete,
 }: Props) {
   const { createUser, updateUser } = useManagementApi();
+
   const [query, setQuery] = React.useState("");
+  const [page, setPage] = React.useState(0);
+  const [pageSize, setPageSize] = React.useState(25);
+
   const [openForm, setOpenForm] = React.useState(false);
   const [editing, setEditing] = React.useState<InventoryUser | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -107,10 +122,27 @@ export default function UserManagementTab({
     });
   }, [query, users]);
 
-  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
+  const totalElements = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalElements / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const rangeStart = totalElements === 0 ? 0 : safePage * pageSize + 1;
+  const rangeEnd = Math.min((safePage + 1) * pageSize, totalElements);
+  const paginated = filtered.slice(
+    safePage * pageSize,
+    (safePage + 1) * pageSize,
+  );
 
-  // Clear department if selected location changes and department no longer matches
+  // Reset to first page when query changes
+  React.useEffect(() => {
+    setPage(0);
+  }, [query]);
+
+  // Clamp page if filtered results shrink
+  React.useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+  }, [page, safePage]);
+
+  // Clear department if it no longer belongs to the selected location
   React.useEffect(() => {
     if (!form.departmentId) return;
     const isDepartmentAvailable = filteredDepartments.some(
@@ -120,6 +152,9 @@ export default function UserManagementTab({
       setForm((prev) => ({ ...prev, departmentId: null }));
     }
   }, [filteredDepartments, form.departmentId]);
+
+  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const openCreate = () => {
     setEditing(null);
@@ -155,7 +190,6 @@ export default function UserManagementTab({
       alert("Password is required when creating a user.");
       return;
     }
-    // ✅ Location is mandatory for non-admin
     if (requiresScope && !form.locationId) {
       alert("Location is required for non-admin users.");
       return;
@@ -223,7 +257,7 @@ export default function UserManagementTab({
           <CardTitle className="text-base">
             Users{" "}
             <span className="text-muted-foreground">
-              {loading ? "" : `(${filtered.length})`}
+              {loading ? "" : `(${totalElements})`}
             </span>
           </CardTitle>
         </CardHeader>
@@ -250,7 +284,7 @@ export default function UserManagementTab({
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : filtered.length === 0 ? (
+                ) : paginated.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -260,7 +294,7 @@ export default function UserManagementTab({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((user) => (
+                  paginated.map((user) => (
                     <TableRow key={user.id}>
                       <TableCell className="font-medium">
                         {user.firstName} {user.lastName}
@@ -315,6 +349,91 @@ export default function UserManagementTab({
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          {/* Pagination footer */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              {totalElements === 0
+                ? "No results"
+                : `Showing ${rangeStart}–${rangeEnd} of ${totalElements}`}
+            </p>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Rows per page
+                </span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    setPageSize(Number(v));
+                    setPage(0);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[70px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((s) => (
+                      <SelectItem key={s} value={String(s)}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage(0)}
+                  disabled={safePage === 0}
+                  title="First page"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={safePage === 0}
+                  title="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="min-w-[90px] text-center text-sm text-muted-foreground">
+                  Page {safePage + 1} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() =>
+                    setPage((p) => Math.min(totalPages - 1, p + 1))
+                  }
+                  disabled={safePage + 1 >= totalPages}
+                  title="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  type="button"
+                  onClick={() => setPage(totalPages - 1)}
+                  disabled={safePage + 1 >= totalPages}
+                  title="Last page"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -372,7 +491,6 @@ export default function UserManagementTab({
               />
             </div>
 
-            {/* ✅ Location — uses ID as value */}
             <div className="space-y-2">
               <Label>Location</Label>
               <Select
@@ -399,7 +517,6 @@ export default function UserManagementTab({
               </Select>
             </div>
 
-            {/* ✅ Department — uses ID as value, filtered by selected location */}
             <div className="space-y-2">
               <Label>Department</Label>
               <Select
