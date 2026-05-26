@@ -56,7 +56,7 @@ const navItems: NavItem[] = [
   },
   {
     to: "/employees",
-    label: "Employees",
+    label: "Management",
     icon: Users,
     roles: ["admin", "admin_user"],
   },
