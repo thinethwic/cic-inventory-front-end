@@ -1,6 +1,7 @@
 // src/lib/asset-api.ts
 import * as React from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "@/lib/auth";
+import { clearPersistedAuthSession } from "@/lib/auth";
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -198,6 +199,9 @@ function buildPageParams(params: FetchAssetsParams): URLSearchParams {
 
 // ─── Response helper ──────────────────────────────────────────────────────────
 async function handleResponse<T>(res: Response): Promise<T> {
+    if (res.status === 401) {
+        clearPersistedAuthSession();
+    }
     if (!res.ok) {
         const text = await res.text().catch(() => "");
         let message = `Request failed with status ${res.status}`;
@@ -227,9 +231,8 @@ async function authFetch(
     getToken: GetTokenFn,
     url: string,
     init: RequestInit = {},
-    template = JWT_TEMPLATE,
 ) {
-    const token = await getToken({ template });
+    const token = await getToken(); // no template arg
     if (!token) throw new Error("No auth token (user not signed in)");
     return fetch(url, {
         ...init,

@@ -1,7 +1,15 @@
 // src/lib/management-api.ts
 import * as React from "react";
-import { useAuth } from "@clerk/clerk-react";
-import type { Department, Location, Supplier, Employee } from "@/types";
+import { useAuth } from "@/lib/auth";
+import { clearPersistedAuthSession } from "@/lib/auth";
+import type {
+    Department,
+    Location,
+    Supplier,
+    Employee,
+    InventoryUser,
+    InventoryUserRole,
+} from "@/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 const API_BASE = `${BASE_URL}/api/v1`;
@@ -33,13 +41,25 @@ export type DepartmentPayload = {
 
 export type LocationPayload = { name: string; code: string };
 export type SupplierPayload = { name: string; phone_no?: string; email?: string };
+export type UserPayload = {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password?: string;
+    location: string;
+    department: string;
+    role: InventoryUserRole;
+    isActive: boolean;
+};
 
 async function apiFetch<T>(
     token: string,
     endpoint: string,
     init: RequestInit = {},
 ): Promise<T> {
-    const url = `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    const url = endpoint.startsWith("/api/")
+        ? `${BASE_URL}${endpoint}`
+        : `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
 
     const res = await fetch(url, {
         ...init,
@@ -50,6 +70,10 @@ async function apiFetch<T>(
             Authorization: `Bearer ${token}`,
         },
     });
+
+    if (res.status === 401) {
+        clearPersistedAuthSession();
+    }
 
     if (!res.ok) {
         const msg = await res.text().catch(() => `HTTP ${res.status}`);
@@ -108,6 +132,23 @@ export function useManagementApi() {
         ]);
 
         return { employees, departments, locations, suppliers };
+    }, [getAuthToken]);
+
+    const loadUserManagement = React.useCallback(async (): Promise<{
+        users: InventoryUser[];
+        departments: Department[];
+        locations: Location[];
+    }> => {
+        const token = await getAuthToken();
+        if (!token) throw new Error("Not authenticated");
+
+        const [users, departments, locations] = await Promise.all([
+            apiFetch<InventoryUser[] | SpringPage<InventoryUser>>(token, `/api/users${ALL}`).then(unwrap),
+            apiFetch<Department[] | SpringPage<Department>>(token, `/departments${ALL}`).then(unwrap),
+            apiFetch<Location[] | SpringPage<Location>>(token, `/locations${ALL}`).then(unwrap),
+        ]);
+
+        return { users, departments, locations };
     }, [getAuthToken]);
 
     // Lightweight load for Assets page — includes suppliers for the dropdown
@@ -216,8 +257,31 @@ export function useManagementApi() {
         [withToken],
     );
 
+    const createUser = React.useCallback(
+        (payload: UserPayload) =>
+            withToken((t) =>
+                apiFetch<InventoryUser>(t, "/api/users", { method: "POST", ...body(payload) }),
+            ),
+        [withToken],
+    );
+
+    const updateUser = React.useCallback(
+        (id: number, payload: UserPayload) =>
+            withToken((t) =>
+                apiFetch<InventoryUser>(t, `/api/users/${id}`, { method: "PUT", ...body(payload) }),
+            ),
+        [withToken],
+    );
+
+    const deleteUser = React.useCallback(
+        (id: number) =>
+            withToken((t) => apiFetch<void>(t, `/api/users/${id}`, { method: "DELETE" })),
+        [withToken],
+    );
+
     return {
         loadAll,
+        loadUserManagement,
         loadAssetLookups,
         createEmployee,
         updateEmployee,
@@ -231,5 +295,8 @@ export function useManagementApi() {
         createLocation,
         updateLocation,
         deleteLocation,
+        createUser,
+        updateUser,
+        deleteUser,
     };
 }

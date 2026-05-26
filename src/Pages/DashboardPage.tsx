@@ -1,6 +1,6 @@
 // src/Pages/DashboardPage.tsx
 import * as React from "react";
-import { useAuth, useUser } from "@clerk/clerk-react";
+import { useAuth, useUser } from "@/lib/auth";
 import {
   Laptop,
   Users,

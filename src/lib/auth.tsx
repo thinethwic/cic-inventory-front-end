@@ -1,0 +1,440 @@
+import * as React from "react";
+import { useNavigate } from "react-router-dom";
+
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL?.trim() || "http://localhost:8080";
+const STORAGE_KEY = "cic-inventory";
+
+type BackendUser = {
+  id: number;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email: string;
+  location: string;
+  department: string;
+  role: string;
+  roles: string[];
+  isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type AuthPayload = {
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: string;
+  user: BackendUser;
+};
+
+type StoredSession = AuthPayload;
+
+type AuthUser = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  primaryEmailAddress: { emailAddress: string };
+  publicMetadata: {
+    role: string;
+    roles: string[];
+    location: string;
+    departmentName: string;
+  };
+};
+
+type AuthContextValue = {
+  isLoaded: boolean;
+  isSignedIn: boolean;
+  user: AuthUser | null;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  getToken: (_opts?: { template?: string }) => Promise<string | null>;
+};
+
+const AuthContext = React.createContext<AuthContextValue | null>(null);
+
+function mapUser(user: BackendUser): AuthUser {
+  return {
+    id: String(user.id),
+    firstName: user.firstName,
+    lastName: user.lastName,
+    fullName: user.fullName || `${user.firstName} ${user.lastName}`.trim(),
+    primaryEmailAddress: { emailAddress: user.email },
+    publicMetadata: {
+      role: user.role,
+      roles: user.roles ?? [user.role],
+      location: user.location,
+      departmentName: user.department,
+    },
+  };
+}
+
+function readStoredSession(): StoredSession | null {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredSession(session: StoredSession | null) {
+  if (!session) {
+    window.localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+}
+
+export function clearPersistedAuthSession() {
+  writeStoredSession(null);
+}
+
+function isExpired(expiresAt: string) {
+  return new Date(expiresAt).getTime() <= Date.now() + 5_000;
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    let message = `Request failed with status ${response.status}`;
+    if (text) {
+      try {
+        const json = JSON.parse(text) as { message?: string; error?: string };
+        message = json.message || json.error || text;
+      } catch {
+        message = text;
+      }
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+export function AuthProvider({
+  children,
+}: React.PropsWithChildren<{
+  publishableKey?: string;
+  afterSignOutUrl?: string;
+  signInForceRedirectUrl?: string;
+  signUpForceRedirectUrl?: string;
+  appearance?: unknown;
+}>) {
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  const [session, setSession] = React.useState<StoredSession | null>(null);
+  const refreshPromiseRef = React.useRef<Promise<string | null> | null>(null);
+
+  const clearSession = React.useCallback(() => {
+    setSession(null);
+    writeStoredSession(null);
+  }, []);
+
+  const persistSession = React.useCallback((payload: AuthPayload) => {
+    setSession(payload);
+    writeStoredSession(payload);
+  }, []);
+
+  const refreshAccessToken = React.useCallback(async (): Promise<
+    string | null
+  > => {
+    const current = readStoredSession();
+    if (!current?.refreshToken) {
+      clearSession();
+      return null;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ refreshToken: current.refreshToken }),
+    });
+
+    const payload = await parseResponse<AuthPayload>(response);
+    persistSession(payload);
+    return payload.accessToken;
+  }, [clearSession, persistSession]);
+
+  const getValidAccessToken = React.useCallback(async (): Promise<
+    string | null
+  > => {
+    const current = readStoredSession();
+    if (!current) return null;
+
+    if (!isExpired(current.accessTokenExpiresAt)) {
+      return current.accessToken;
+    }
+
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = refreshAccessToken()
+        .catch(() => {
+          clearSession();
+          return null;
+        })
+        .finally(() => {
+          refreshPromiseRef.current = null;
+        });
+    }
+
+    return refreshPromiseRef.current;
+  }, [clearSession, refreshAccessToken]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      const current = readStoredSession();
+      if (!current) {
+        if (!cancelled) setIsLoaded(true);
+        return;
+      }
+
+      try {
+        const token = await getValidAccessToken();
+        if (!token) {
+          throw new Error("Session expired");
+        }
+
+        const meResponse = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const user = await parseResponse<BackendUser>(meResponse);
+        if (!cancelled) {
+          const nextSession = {
+            ...(readStoredSession() ?? current),
+            user,
+          };
+          setSession(nextSession);
+          writeStoredSession(nextSession);
+        }
+      } catch {
+        if (!cancelled) {
+          clearSession();
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoaded(true);
+        }
+      }
+    };
+
+    void bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearSession, getValidAccessToken, persistSession]);
+
+  const signInWithPassword = React.useCallback(
+    async (email: string, password: string) => {
+      clearSession();
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const payload = await parseResponse<AuthPayload>(response);
+        persistSession(payload);
+      } catch (error) {
+        clearSession();
+        throw error;
+      }
+    },
+    [clearSession, persistSession],
+  );
+
+  const signOut = React.useCallback(async () => {
+    const current = readStoredSession();
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          ...(current?.accessToken
+            ? { Authorization: `Bearer ${current.accessToken}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          refreshToken: current?.refreshToken ?? null,
+        }),
+      });
+    } finally {
+      clearSession();
+    }
+  }, [clearSession]);
+
+  const user = session?.user ? mapUser(session.user) : null;
+
+  const value = React.useMemo<AuthContextValue>(
+    () => ({
+      isLoaded,
+      isSignedIn: !!user,
+      user,
+      signInWithPassword,
+      signOut,
+      getToken: async () => getValidAccessToken(),
+    }),
+    [getValidAccessToken, isLoaded, signInWithPassword, signOut, user],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function useAuthContext() {
+  const value = React.useContext(AuthContext);
+  if (!value) {
+    throw new Error("Auth context is not available");
+  }
+  return value;
+}
+
+export function useAuth() {
+  const context = useAuthContext();
+  return {
+    isLoaded: context.isLoaded,
+    isSignedIn: context.isSignedIn,
+    getToken: context.getToken,
+    signOut: context.signOut,
+  };
+}
+
+export function useUser() {
+  const context = useAuthContext();
+  return {
+    isLoaded: context.isLoaded,
+    isSignedIn: context.isSignedIn,
+    user: context.user,
+  };
+}
+
+export function SignIn({
+  afterSignInUrl = "/",
+}: {
+  routing?: string;
+  afterSignInUrl?: string;
+  appearance?: unknown;
+}) {
+  const navigate = useNavigate();
+  const { signInWithPassword } = useAuthContext();
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await signInWithPassword(email.trim(), password);
+      navigate(afterSignInUrl, { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div className="space-y-2">
+        <Label htmlFor="email">Email</Label>
+        <Input
+          id="email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={submitting}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="password">Password</Label>
+        <Input
+          id="password"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          disabled={submitting}
+          required
+        />
+      </div>
+      {error ? (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      ) : null}
+      <Button type="submit" className="w-full" disabled={submitting}>
+        {submitting ? "Signing in..." : "Sign in"}
+      </Button>
+    </form>
+  );
+}
+
+export function UserButton({
+  afterSignOutUrl = "/login",
+  appearance,
+}: {
+  afterSignOutUrl?: string;
+  appearance?: { elements?: { avatarBox?: string } };
+}) {
+  const navigate = useNavigate();
+  const { user, signOut } = useAuthContext();
+  const initials = user
+    ? `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase()
+    : "U";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" className="rounded-full">
+          <Avatar className={appearance?.elements?.avatarBox}>
+            <AvatarFallback>{initials || "U"}</AvatarFallback>
+          </Avatar>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => {
+            void signOut().finally(() =>
+              navigate(afterSignOutUrl, { replace: true }),
+            );
+          }}
+        >
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

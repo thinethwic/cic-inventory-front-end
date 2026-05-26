@@ -7,9 +7,10 @@ import {
   FileBarChart2,
   ShieldCheck,
   Settings,
+  UserCog,
   type LucideIcon,
 } from "lucide-react";
-import { UserButton, useUser } from "@clerk/clerk-react";
+import { UserButton, useUser } from "@/lib/auth";
 
 import logo from "@/assets/Logo.png";
 
@@ -24,7 +25,6 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 
-import { hasRole } from "@/utils/permissions";
 import { usePermissions } from "@/hooks/usePermissions";
 
 /* ================= TYPES ================= */
@@ -61,6 +61,12 @@ const navItems: NavItem[] = [
     roles: ["admin", "admin_user"],
   },
   {
+    to: "/users",
+    label: "Users",
+    icon: UserCog,
+    roles: ["admin"],
+  },
+  {
     to: "/maintenance",
     label: "Maintenance",
     icon: Wrench,
@@ -90,11 +96,10 @@ const navItems: NavItem[] = [
 
 export default function AppSidebar() {
   const { role } = usePermissions();
-  const isAdmin = hasRole(role, ["admin", "admin_user"]);
   const { user } = useUser();
   const location = useLocation();
 
-  // 🔐 Get extra metadata from Clerk (role already comes from usePermissions)
+  // Role and profile details come from the backend auth session
   const metaRole = user?.publicMetadata?.role as Role | undefined;
   const Userlocation = user?.publicMetadata?.location as
     | UserLocation
@@ -178,10 +183,12 @@ export default function AppSidebar() {
               {metaRole ?? "role"}
             </div>
 
-            <div className="truncate text-xs text-sidebar-foreground/60">
-              {Userlocation ?? "location"}
-            </div>
-            {!isAdmin && (
+            {metaRole !== "admin" && (
+              <div className="truncate text-xs text-sidebar-foreground/60">
+                {Userlocation || "No location"}
+              </div>
+            )}
+            {metaRole !== "admin" && (
               <div className="truncate text-xs text-sidebar-foreground/60">
                 {UserDepartment ?? "No department"}
               </div>

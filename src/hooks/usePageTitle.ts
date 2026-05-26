@@ -6,11 +6,11 @@ const ROUTE_TITLES: Record<string, string> = {
     "/assets": "Assets",
     "/maintenance": "Maintenance",
     "/employees": "Management",
+    "/users": "Users",
     "/reports": "Reports",
     "/assetTransfer": "Asset Transfer",
     "/settings": "Settings",
-    "/login": "Login",
-    "/signup": "SignUp"
+    "/login": "Login"
 };
 
 const APP_NAME = "CIC Asset Inventory";  // ← fixed spelling (was "Wick")

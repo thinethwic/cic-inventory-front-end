@@ -1,5 +1,5 @@
 // src/lib/asset-transfer-api.ts
-import { useAuth } from "@clerk/clerk-react";
+import { clearPersistedAuthSession, useAuth } from "@/lib/auth";
 import * as React from "react";
 import type { Asset, Employee, Location } from "@/types";
 
@@ -106,6 +106,10 @@ export async function apiFetch<T>(
         });
     } catch (err) {
         throw new Error(`Network error: ${String(err)}`);
+    }
+
+    if (res.status === 401) {
+        clearPersistedAuthSession();
     }
 
     if (res.status === 204) return undefined as T;

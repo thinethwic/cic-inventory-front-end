@@ -105,13 +105,19 @@ export type Supplier = EntityBase & {
     email?: string;
 };
 
-export type UserRole = "Admin" | "Technician" | "Viewer";
+export type InventoryUserRole = "admin" | "admin_user" | "user";
 
-export type SystemUser = EntityBase & {
-    name: string;
+export type InventoryUser = EntityBase & {
+    firstName: string;
+    lastName: string;
+    fullName: string;
     email: string;
-    role: UserRole;
-    active: boolean;
+    location: string;
+    department: string;
+    role: InventoryUserRole;
+    roles: InventoryUserRole[];
+    isActive: boolean;
+    updatedAt?: string;
 };
 
 export type EmployeeStatus = "ACTIVE" | "INACTIVE";

@@ -1,15 +1,20 @@
 // src/hooks/usePermissions.ts
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@/lib/auth";
 
 export function usePermissions() {
     const { user } = useUser();
 
-    const meta = user?.publicMetadata ?? {};
+    const meta = (user?.publicMetadata ?? {}) as {
+        role?: string;
+        roles?: string[];
+        location?: string;
+        departmentName?: string;
+    };
 
-    const role = (meta.role as string) ?? "";
-    const roles = (meta.roles as string[]) ?? [];
-    const location = (meta.location as string) ?? "";
-    const department = (meta.departmentName as string) ?? "";
+    const role = meta.role ?? "";
+    const roles = meta.roles ?? [];
+    const location = meta.location ?? "";
+    const department = meta.departmentName ?? "";
 
     const isAdmin =
         roles.some((r) => r.toLowerCase() === "admin") ||

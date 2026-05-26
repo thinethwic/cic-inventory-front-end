@@ -1,6 +1,6 @@
 // src/lib/maintainance-api.ts
 import * as React from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { clearPersistedAuthSession, useAuth } from "@/lib/auth";
 import type { Asset, Supplier } from "@/types";
 import type {
     Maintenance,
@@ -24,6 +24,9 @@ async function apiFetch<T>(token: string, endpoint: string, init: RequestInit = 
         });
     } catch (networkErr) {
         throw new Error(`Network error — is the backend running? (${String(networkErr)})`);
+    }
+    if (res.status === 401) {
+        clearPersistedAuthSession();
     }
     if (res.status === 204) return undefined as T;
     const contentType = res.headers.get("content-type") ?? "";

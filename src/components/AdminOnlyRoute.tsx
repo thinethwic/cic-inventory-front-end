@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@/lib/auth";
 import { Navigate } from "react-router-dom";
 
 export default function AdminOnlyRoute({

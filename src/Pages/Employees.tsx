@@ -1,6 +1,6 @@
 // src/Pages/EmployeesPage.tsx
 import * as React from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "@/lib/auth";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -14,7 +14,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import type { Department, Location, Supplier, Employee } from "@/types";
+import type {
+  Department,
+  Location,
+  Supplier,
+  Employee,
+} from "@/types";
 import {
   EmployeesTab,
   SuppliersTab,

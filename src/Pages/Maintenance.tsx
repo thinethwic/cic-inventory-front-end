@@ -2,7 +2,7 @@
 import * as React from "react";
 
 import { MaintenanceGatePass } from "@/components/Gatepassprint";
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@/lib/auth";
 import { Printer } from "lucide-react";
 
 import {
@@ -31,7 +31,7 @@ import {
   MapPin,
   X,
 } from "lucide-react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "@/lib/auth";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

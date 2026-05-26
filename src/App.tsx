@@ -4,13 +4,14 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import DashboardLayout from "./components/DashboardLayout";
 import AdminProtectedRoute from "./components/AdminProtectedRoute";
 import AdminOnlyRoute from "./components/AdminOnlyRoute";
+import SuperAdminRoute from "./components/SuperAdminRoute";
 import { usePageTitle } from "./hooks/usePageTitle";
 
 const LoginPage = lazy(() => import("./Pages/LoginPage"));
-const SignUpPage = lazy(() => import("./Pages/SignUpPage"));
 const Dashboard = lazy(() => import("./Pages/DashboardPage"));
 const Assets = lazy(() => import("./Pages/Assets"));
 const EmployeesPage = lazy(() => import("./Pages/Employees"));
+const UsersPage = lazy(() => import("./Pages/UsersPage"));
 const MaintenancePage = lazy(() => import("./Pages/Maintenance"));
 const ReportsPage = lazy(() => import("./Pages/Reports"));
 const AssetTransfer = lazy(() => import("./Pages/AssetTransfer"));
@@ -43,15 +44,6 @@ export default function App() {
           </LazyPage>
         }
       />
-      <Route
-        path="/signup"
-        element={
-          <LazyPage>
-            <SignUpPage />
-          </LazyPage>
-        }
-      />
-
       {/* Protected Layout: all logged-in roles */}
       <Route
         path="/"
@@ -107,6 +99,16 @@ export default function App() {
           }
         />
         <Route
+          path="users"
+          element={
+            <SuperAdminRoute>
+              <LazyPage>
+                <UsersPage />
+              </LazyPage>
+            </SuperAdminRoute>
+          }
+        />
+        <Route
           path="reports"
           element={
             <AdminOnlyRoute>
@@ -128,6 +130,7 @@ export default function App() {
         />
       </Route>
 
+      <Route path="/signup" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

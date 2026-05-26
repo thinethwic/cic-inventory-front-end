@@ -44,7 +44,7 @@ import {
 
 import { AssetGatePass } from "@/components/Gatepassprint";
 
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth } from "@/lib/auth";
 import { useManagementApi } from "@/lib/management-api";
 import { useAssetApi } from "@/lib/api";
 

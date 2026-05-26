@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useUser } from "@clerk/clerk-react";
+import { useUser } from "@/lib/auth";
 import { motion } from "framer-motion";
 import { Navigate } from "react-router-dom";
 
