@@ -46,8 +46,8 @@ export type UserPayload = {
     lastName: string;
     email: string;
     password?: string;
-    location: string;
-    department: string;
+    locationId: number | null;      // ✅ was: location: string
+    departmentId: number | null;    // ✅ was: department: string
     role: InventoryUserRole;
     isActive: boolean;
 };

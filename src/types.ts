@@ -114,6 +114,8 @@ export type InventoryUser = EntityBase & {
     email: string;
     location: string;
     department: string;
+    locationId: number | null;    // ✅ add this
+    departmentId: number | null;  // ✅ add this
     role: InventoryUserRole;
     roles: InventoryUserRole[];
     isActive: boolean;

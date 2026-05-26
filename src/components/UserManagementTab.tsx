@@ -59,8 +59,8 @@ const blankForm: FormState = {
   lastName: "",
   email: "",
   password: "",
-  location: "",
-  department: "",
+  locationId: null,
+  departmentId: null,
   role: "user",
   isActive: true,
 };
@@ -79,20 +79,15 @@ export default function UserManagementTab({
   const [editing, setEditing] = React.useState<InventoryUser | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [form, setForm] = React.useState<FormState>(blankForm);
+
   const selectedRole = form.role;
   const requiresScope = selectedRole !== "admin";
-  const selectedLocation = form.location.trim().toLowerCase();
+  const selectedLocationId = form.locationId;
 
   const filteredDepartments = React.useMemo(() => {
-    if (!selectedLocation) {
-      return departments;
-    }
-
-    return departments.filter((department) => {
-      const departmentLocation = department.location?.name?.trim().toLowerCase() ?? "";
-      return departmentLocation === selectedLocation;
-    });
-  }, [departments, selectedLocation]);
+    if (!selectedLocationId) return departments;
+    return departments.filter((d) => d.location?.id === selectedLocationId);
+  }, [departments, selectedLocationId]);
 
   const filtered = React.useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -112,22 +107,19 @@ export default function UserManagementTab({
     });
   }, [query, users]);
 
-  const setField = (key: keyof FormState, value: string | boolean) =>
+  const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // Clear department if selected location changes and department no longer matches
   React.useEffect(() => {
-    if (!form.department) {
-      return;
-    }
-
+    if (!form.departmentId) return;
     const isDepartmentAvailable = filteredDepartments.some(
-      (department) => department.name === form.department,
+      (d) => d.id === form.departmentId,
     );
-
     if (!isDepartmentAvailable) {
-      setForm((prev) => ({ ...prev, department: "" }));
+      setForm((prev) => ({ ...prev, departmentId: null }));
     }
-  }, [filteredDepartments, form.department]);
+  }, [filteredDepartments, form.departmentId]);
 
   const openCreate = () => {
     setEditing(null);
@@ -142,8 +134,8 @@ export default function UserManagementTab({
       lastName: user.lastName,
       email: user.email,
       password: "",
-      location: user.location,
-      department: user.department,
+      locationId: user.locationId ?? null,
+      departmentId: user.departmentId ?? null,
       role: user.role,
       isActive: user.isActive,
     });
@@ -163,8 +155,9 @@ export default function UserManagementTab({
       alert("Password is required when creating a user.");
       return;
     }
-    if (requiresScope && !form.location.trim() && !form.department.trim()) {
-      alert("Location or department is required for non-admin users.");
+    // ✅ Location is mandatory for non-admin
+    if (requiresScope && !form.locationId) {
+      alert("Location is required for non-admin users.");
       return;
     }
 
@@ -172,8 +165,8 @@ export default function UserManagementTab({
     try {
       const payload: UserPayload = {
         ...form,
-        location: requiresScope ? form.location : "",
-        department: requiresScope ? form.department : "",
+        locationId: requiresScope ? form.locationId : null,
+        departmentId: requiresScope ? form.departmentId : null,
       };
 
       if (editing) {
@@ -378,12 +371,17 @@ export default function UserManagementTab({
                 disabled={saving}
               />
             </div>
+
+            {/* ✅ Location — uses ID as value */}
             <div className="space-y-2">
               <Label>Location</Label>
               <Select
-                value={form.location || "__none__"}
+                value={form.locationId ? String(form.locationId) : "__none__"}
                 onValueChange={(value) =>
-                  setField("location", value === "__none__" ? "" : value)
+                  setField(
+                    "locationId",
+                    value === "__none__" ? null : Number(value),
+                  )
                 }
                 disabled={saving || !requiresScope}
               >
@@ -393,26 +391,37 @@ export default function UserManagementTab({
                 <SelectContent>
                   <SelectItem value="__none__">No location</SelectItem>
                   {locations.map((location) => (
-                    <SelectItem key={location.id} value={location.name}>
+                    <SelectItem key={location.id} value={String(location.id)}>
                       {location.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* ✅ Department — uses ID as value, filtered by selected location */}
             <div className="space-y-2">
               <Label>Department</Label>
               <Select
-                value={form.department || "__none__"}
-                onValueChange={(value) =>
-                  setField("department", value === "__none__" ? "" : value)
+                value={
+                  form.departmentId ? String(form.departmentId) : "__none__"
                 }
-                disabled={saving || !requiresScope || (!!form.location && filteredDepartments.length === 0)}
+                onValueChange={(value) =>
+                  setField(
+                    "departmentId",
+                    value === "__none__" ? null : Number(value),
+                  )
+                }
+                disabled={
+                  saving ||
+                  !requiresScope ||
+                  (!!form.locationId && filteredDepartments.length === 0)
+                }
               >
                 <SelectTrigger>
                   <SelectValue
                     placeholder={
-                      form.location
+                      form.locationId
                         ? "Select a department"
                         : "Select location first or choose any department"
                     }
@@ -421,18 +430,22 @@ export default function UserManagementTab({
                 <SelectContent>
                   <SelectItem value="__none__">No department</SelectItem>
                   {filteredDepartments.map((department) => (
-                    <SelectItem key={department.id} value={department.name}>
+                    <SelectItem
+                      key={department.id}
+                      value={String(department.id)}
+                    >
                       {department.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {form.location && filteredDepartments.length === 0 ? (
+              {form.locationId && filteredDepartments.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   No departments are mapped to this location yet.
                 </p>
               ) : null}
             </div>
+
             <div className="space-y-2">
               <Label>Role</Label>
               <Select
@@ -457,14 +470,16 @@ export default function UserManagementTab({
             <div className="space-y-2 sm:col-span-2">
               <p className="text-xs text-muted-foreground">
                 Admin users do not require a location or department. Non-admin
-                users must have at least one access scope.
+                users must have at least one access scope assigned.
               </p>
             </div>
             <div className="space-y-2">
               <Label>Status</Label>
               <Select
                 value={form.isActive ? "active" : "inactive"}
-                onValueChange={(value) => setField("isActive", value === "active")}
+                onValueChange={(value) =>
+                  setField("isActive", value === "active")
+                }
                 disabled={saving}
               >
                 <SelectTrigger>
