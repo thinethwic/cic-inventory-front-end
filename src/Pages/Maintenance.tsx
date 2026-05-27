@@ -1534,7 +1534,7 @@ export default function MaintenancePage() {
         createdBy={
           gpTicket?.createdBy
             ? `${gpTicket.createdBy.firstName} ${gpTicket.createdBy.lastName}`
-            : (user?.fullName ?? "—")
+            : undefined
         }
         updatedBy={
           gpTicket?.updatedBy

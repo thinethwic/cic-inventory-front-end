@@ -539,13 +539,6 @@ export function MaintenanceGatePass({
     ...(isCompleted
       ? [{ label: "Completed Date", value: m.completedDate ?? fmtDate() }]
       : []),
-    // ── Audit fields ───────────────────────────────────────────────────────
-    ...(createdBy ? [{ label: "Created By", value: createdBy }] : []),
-    ...(updatedBy && isCompleted
-      ? [{ label: "Completed By", value: updatedBy }]
-      : updatedBy
-        ? [{ label: "Last Updated By", value: updatedBy }]
-        : []),
   ];
 
   const PRINT_ID = "maintenance-gate-pass-print";
