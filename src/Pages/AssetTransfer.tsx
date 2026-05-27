@@ -1,6 +1,7 @@
 // src/Pages/AssetTransferPage.tsx
 import * as React from "react";
 import { useAuth } from "@/lib/auth";
+import { toast } from "sonner";
 import {
   Repeat,
   Search,
@@ -814,12 +815,15 @@ export default function AssetTransferPage() {
 
   // ── Transfer handler ───────────────────────────────────────────────────────
   async function handleTransfer() {
+    // Replace every early-return setError block like this pattern:
     if (!selectedAsset) {
       setError("Please select an asset.");
+      toast.error("Please select an asset."); // ← ADD
       return;
     }
     if (!transferDate) {
       setError("Please select a transfer date.");
+      toast.error("Please select a transfer date."); // ← ADD
       return;
     }
     if (
@@ -827,6 +831,7 @@ export default function AssetTransferPage() {
       !newEmployeeId
     ) {
       setError("Please select a new employee.");
+      toast.error("Please select a new employee."); // ← ADD
       return;
     }
     if (
@@ -834,15 +839,16 @@ export default function AssetTransferPage() {
       !newLocationId
     ) {
       setError("Please select a new location.");
+      toast.error("Please select a new location."); // ← ADD
       return;
     }
-
     if (transferType === "employee" || transferType === "both") {
       if (
         selectedAsset.assignedToId &&
         selectedAsset.assignedToId === newEmployeeId
       ) {
         setError("Asset is already assigned to this employee.");
+        toast.error("Asset is already assigned to this employee."); // ← ADD
         return;
       }
     }
@@ -852,16 +858,16 @@ export default function AssetTransferPage() {
         selectedAsset.locationId === newLocationId
       ) {
         setError("Asset is already at this location.");
+        toast.error("Asset is already at this location."); // ← ADD
         return;
       }
     }
-
     const numericAssetId = parseInt(selectedAsset.id, 10);
     if (isNaN(numericAssetId)) {
       setError("Invalid asset ID.");
+      toast.error("Invalid asset ID."); // ← ADD
       return;
     }
-
     setSubmitting(true);
     setError("");
     setSuccess("");
@@ -993,8 +999,15 @@ export default function AssetTransferPage() {
           extractName(updatedAsset.assignedTo as unknown) || "nobody"
         } at ${extractName(updatedAsset.location as unknown) || "no location"}.`,
       );
+      toast.success("Transfer complete", {
+        description: `${updatedAsset.assetCode} → ${
+          extractName(updatedAsset.assignedTo as unknown) || "unassigned"
+        } at ${extractName(updatedAsset.location as unknown) || "no location"}`,
+      });
     } catch (err) {
-      setError(getReadableErrorMessage(err, "Transfer failed."));
+      const msg = getReadableErrorMessage(err, "Transfer failed.");
+      setError(msg);
+      toast.error("Transfer failed", { description: msg }); // ← ADD
     } finally {
       setSubmitting(false);
     }

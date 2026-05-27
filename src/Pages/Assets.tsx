@@ -1,5 +1,6 @@
 // src/Pages/Assets.tsx
 import * as React from "react";
+import { toast } from "sonner";
 import {
   Plus,
   Pencil,
@@ -1643,6 +1644,11 @@ export default function Assets() {
       setForm(emptyAssetForm);
       setCustomCategory("");
       await loadPage();
+
+      // ← NEW
+      toast.success(editingId ? "Asset updated" : "Asset created", {
+        description: `${payload.assetCode} — ${[payload.brand, payload.model].filter(Boolean).join(" ")}`,
+      });
     } catch (e) {
       console.error("save asset failed:", e);
       const msg =
@@ -1650,6 +1656,7 @@ export default function Assets() {
           ? e.message
           : "Failed to save asset. Please try again.";
       setSaveError(msg);
+      toast.error("Save failed", { description: msg }); // ← NEW
     } finally {
       setSaving(false);
     }
@@ -1677,8 +1684,11 @@ export default function Assets() {
       await remove(deleteId);
       setDeleteId(null);
       setDeleteError(null);
-
       await loadPage();
+
+      // ← NEW
+      toast.success("Asset deleted");
+
       if (page > 1) {
         setPage((p) => {
           const newTotal = allAssets.length - 1;
@@ -1711,6 +1721,7 @@ export default function Assets() {
       }
 
       setDeleteError(message);
+      toast.error("Delete failed", { description: message }); // ← NEW
     } finally {
       setDeleteLoading(false);
     }

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { toast } from "sonner";
 import {
   ChevronLeft,
   ChevronRight,
@@ -179,19 +180,19 @@ export default function UserManagementTab({
 
   const save = async () => {
     if (!form.firstName.trim() || !form.lastName.trim()) {
-      alert("First name and last name are required.");
+      toast.error("First name and last name are required.");
       return;
     }
     if (!form.email.trim()) {
-      alert("Email is required.");
+      toast.error("Email is required.");
       return;
     }
     if (!editing && !form.password?.trim()) {
-      alert("Password is required when creating a user.");
+      toast.error("Password is required when creating a user.");
       return;
     }
     if (requiresScope && !form.locationId) {
-      alert("Location is required for non-admin users.");
+      toast.error("Location is required for non-admin users.");
       return;
     }
 
@@ -208,16 +209,25 @@ export default function UserManagementTab({
         setUsers((current) =>
           current.map((item) => (item.id === editing.id ? updated : item)),
         );
+        toast.success("User updated", {
+          description: `${updated.firstName} ${updated.lastName}`,
+        });
       } else {
         const created = await createUser(payload);
         setUsers((current) => [created, ...current]);
+        toast.success("User created", {
+          description: `${created.firstName} ${created.lastName}`,
+        });
       }
 
       setOpenForm(false);
       setEditing(null);
       setForm(blankForm);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Unable to save user");
+      toast.error("Save failed", {
+        description:
+          error instanceof Error ? error.message : "Unable to save user",
+      });
     } finally {
       setSaving(false);
     }

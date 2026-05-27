@@ -1,5 +1,5 @@
 import * as React from "react";
-
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,10 +58,15 @@ export default function UsersPage() {
     if (!deleteTarget) return;
     try {
       await apiRef.current.deleteUser(deleteTarget.id);
-      setUsers((current) => current.filter((user) => user.id !== deleteTarget.id));
+      setUsers((current) =>
+        current.filter((user) => user.id !== deleteTarget.id),
+      );
+      toast.success("User deleted", { description: deleteTarget.label });
       setDeleteTarget(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      toast.error("Delete failed", {
+        description: err instanceof Error ? err.message : "Delete failed",
+      });
     }
   };
 

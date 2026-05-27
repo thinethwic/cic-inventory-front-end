@@ -2,6 +2,8 @@
 import * as React from "react";
 import { useAuth } from "@/lib/auth";
 
+import { toast } from "sonner";
+
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
@@ -14,12 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-import type {
-  Department,
-  Location,
-  Supplier,
-  Employee,
-} from "@/types";
+import type { Department, Location, Supplier, Employee } from "@/types";
 import {
   EmployeesTab,
   SuppliersTab,
@@ -96,7 +93,9 @@ export default function EmployeesPage() {
       }
       setDeleteTarget(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      toast.error("Delete failed", {
+        description: err instanceof Error ? err.message : "Delete failed",
+      });
     }
   };
 

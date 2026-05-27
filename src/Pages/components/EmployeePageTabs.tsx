@@ -1,5 +1,6 @@
 // src/Pages/components/EmployeePageTabs.tsx
 import * as React from "react";
+import { toast } from "sonner";
 import {
   Plus,
   Pencil,
@@ -801,16 +802,23 @@ export function EmployeesTab({
       if (editing) {
         const updated = await updateEmployee(editing.id, payload);
         setEmployees((p) => p.map((x) => (x.id === editing.id ? updated : x)));
+        toast.success("Employee updated", {
+          description: `${payload.empId} — ${payload.name}`,
+        });
       } else {
         const created = await createEmployee(payload);
         setEmployees((p) => [created, ...p]);
+        toast.success("Employee created", {
+          description: `${created.empId} — ${created.name}`,
+        });
       }
 
       setOpenForm(false);
       setEditing(null);
       setForm(blankForm());
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Save failed");
+      const msg = e instanceof Error ? e.message : "Save failed";
+      toast.error("Save failed", { description: msg });
     } finally {
       setSaving(false);
     }
@@ -1149,21 +1157,28 @@ export function SuppliersTab({
   };
 
   const save = async () => {
-    if (!form.name.trim()) return alert("Supplier name is required.");
+    if (!form.name.trim()) {
+      toast.error("Supplier name is required.");
+      return;
+    }
+
     setSaving(true);
     try {
       if (editing) {
         const updated = await updateSupplier(editing.id, form);
         setSuppliers((p) => p.map((x) => (x.id === editing.id ? updated : x)));
+        toast.success("Supplier updated", { description: updated.name });
       } else {
         const created = await createSupplier(form);
         setSuppliers((p) => [created, ...p]);
+        toast.success("Supplier created", { description: created.name });
       }
       setOpenForm(false);
       setEditing(null);
-      setForm(blank); // ← reset form after save
+      setForm(blank);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Save failed");
+      const msg = e instanceof Error ? e.message : "Save failed";
+      toast.error("Save failed", { description: msg });
     } finally {
       setSaving(false);
     }
@@ -1404,15 +1419,22 @@ export function DepartmentsTab({
         setDepartments((p) =>
           p.map((x) => (x.id === editing.id ? updated : x)),
         );
+        toast.success("Department updated", {
+          description: `${updated.name} (${updated.code})`,
+        });
       } else {
         const created = await createDepartment(payload);
         setDepartments((p) => [created, ...p]);
+        toast.success("Department created", {
+          description: `${created.name} (${created.code})`,
+        });
       }
       setOpenForm(false);
       setEditing(null);
-      setForm(blankForm()); // ← reset form after save
+      setForm(blankForm());
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Save failed");
+      const msg = e instanceof Error ? e.message : "Save failed";
+      toast.error("Save failed", { description: msg });
     } finally {
       setSaving(false);
     }
@@ -1622,22 +1644,36 @@ export function LocationsTab({
   };
 
   const save = async () => {
-    if (!form.name.trim()) return alert("Location name is required.");
-    if (!form.code.trim()) return alert("Location code is required.");
+    if (!form.name.trim()) {
+      toast.error("Location name is required.");
+      return;
+    }
+    if (!form.code.trim()) {
+      toast.error("Location code is required.");
+      return;
+    }
+
     setSaving(true);
     try {
       if (editing) {
         const updated = await updateLocation(editing.id, form);
         setLocations((p) => p.map((x) => (x.id === editing.id ? updated : x)));
+        toast.success("Location updated", {
+          description: `${updated.name} (${updated.code})`,
+        });
       } else {
         const created = await createLocation(form);
         setLocations((p) => [created, ...p]);
+        toast.success("Location created", {
+          description: `${created.name} (${created.code})`,
+        });
       }
       setOpenForm(false);
       setEditing(null);
-      setForm(blank); // ← reset form after save
+      setForm(blank);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Save failed");
+      const msg = e instanceof Error ? e.message : "Save failed";
+      toast.error("Save failed", { description: msg });
     } finally {
       setSaving(false);
     }
