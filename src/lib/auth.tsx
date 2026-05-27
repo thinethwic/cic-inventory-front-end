@@ -7,6 +7,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -402,6 +403,8 @@ export function SignIn({
   );
 }
 
+import { LogOut } from "lucide-react";
+
 export function UserButton({
   afterSignOutUrl = "/login",
   appearance,
@@ -411,27 +414,62 @@ export function UserButton({
 }) {
   const navigate = useNavigate();
   const { user, signOut } = useAuthContext();
+
   const initials = user
     ? `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase()
     : "U";
 
+  const fullName = user
+    ? [user.firstName, user.lastName].filter(Boolean).join(" ")
+    : null;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="rounded-full">
+        <button
+          type="button"
+          className="rounded-full ring-offset-background transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
           <Avatar className={appearance?.elements?.avatarBox}>
-            <AvatarFallback>{initials || "U"}</AvatarFallback>
+            <AvatarFallback className="select-none">
+              {initials || "U"}
+            </AvatarFallback>
           </Avatar>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+
+      <DropdownMenuContent align="end" className="w-56">
+        {/* User identity header */}
+        {user && (
+          <>
+            <div className="flex items-center gap-3 px-3 py-2.5">
+              <Avatar className="h-8 w-8 shrink-0">
+                <AvatarFallback className="text-xs select-none">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex min-w-0 flex-col">
+                {fullName && (
+                  <span className="truncate text-sm font-medium leading-none">
+                    {fullName}
+                  </span>
+                )}
+              </div>
+            </div>
+            <DropdownMenuSeparator />
+          </>
+        )}
+
+        {/* Sign out */}
         <DropdownMenuItem
+          className="text-destructive focus:text-destructive gap-2 cursor-pointer"
           onClick={() => {
             void signOut().finally(() =>
               navigate(afterSignOutUrl, { replace: true }),
             );
           }}
         >
+          <LogOut className="h-4 w-4 shrink-0" aria-hidden="true" />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
