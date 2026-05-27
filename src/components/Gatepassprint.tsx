@@ -1,7 +1,7 @@
 // src/components/GatePassPrint.tsx
 
 import * as React from "react";
-import { Printer, X, CheckCircle2 } from "lucide-react";
+import { Printer, X, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -493,6 +493,7 @@ export interface MaintenanceGatePassProps {
   updatedBy?: string;
   userLocation?: string;
   assetName?: string;
+  loading?: boolean; // ← add
 }
 
 type ExtendedMaintenance = Maintenance & {
@@ -510,6 +511,7 @@ export function MaintenanceGatePass({
   updatedBy,
   userLocation,
   assetName,
+  loading, // ← add
 }: MaintenanceGatePassProps) {
   const completedAt = React.useMemo(() => {
     if (!maintenance || maintenance.status !== "Completed") return null;
@@ -562,19 +564,27 @@ export function MaintenanceGatePass({
         </DialogHeader>
 
         <div className="flex-1 overflow-auto bg-muted/40 p-3 sm:p-6">
-          <GatePassCard
-            title="Maintenance Gate Pass"
-            location={resolvedLocation !== "—" ? resolvedLocation : undefined}
-            createdBy={createdBy}
-            updatedBy={updatedBy}
-            refNo={m.ticketNo}
-            accentHex="#c2410c"
-            footerNote="Present this pass when collecting the repaired asset."
-            fields={fields}
-            printId={PRINT_ID}
-            completedAt={completedAt}
-            isCompleted={isCompleted}
-          />
+          {/* Show spinner while audit data loads */}
+          {loading ? (
+            <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Loading ticket details...</span>
+            </div>
+          ) : (
+            <GatePassCard
+              title="Maintenance Gate Pass"
+              location={resolvedLocation !== "—" ? resolvedLocation : undefined}
+              createdBy={createdBy}
+              updatedBy={updatedBy}
+              refNo={m.ticketNo}
+              accentHex="#c2410c"
+              footerNote="Present this pass when collecting the repaired asset."
+              fields={fields}
+              printId={PRINT_ID}
+              completedAt={completedAt}
+              isCompleted={isCompleted}
+            />
+          )}
         </div>
 
         <GatePassFooter onClose={onClose} printId={PRINT_ID} />

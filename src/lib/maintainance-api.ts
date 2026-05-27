@@ -39,6 +39,18 @@ async function apiFetch<T>(token: string, endpoint: string, init: RequestInit = 
     return res.json() as Promise<T>;
 }
 
+export async function fetchMaintenanceById(
+    getToken: () => Promise<string | null>,
+    id: string,
+): Promise<Maintenance> {
+    const token = await getToken();
+    const res = await fetch(`/api/v1/maintenances/${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error("Failed to fetch maintenance ticket");
+    return res.json();
+}
+
 function reqBody(payload: unknown): RequestInit { return { body: JSON.stringify(payload) }; }
 
 const STATUS_TO_BACKEND: Record<string, string> = {

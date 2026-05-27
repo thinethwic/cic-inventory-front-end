@@ -103,6 +103,7 @@ import {
   updateMaintenance,
   deleteMaintenance,
   markMaintenanceCompleted,
+  fetchMaintenanceById,
 } from "@/lib/maintainance-api";
 import { useAssetApi } from "@/lib/api";
 
@@ -906,6 +907,13 @@ export default function MaintenancePage() {
     },
   });
 
+  const { data: gpTicketDetail, isLoading: gpTicketLoading } = useQuery({
+    queryKey: ["maintenance-detail", gpTicket?.id],
+    queryFn: () => fetchMaintenanceById(getToken, gpTicket!.id),
+    enabled: !!gpTicket,
+    staleTime: 0,
+  });
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -1528,21 +1536,22 @@ export default function MaintenancePage() {
       </AlertDialog>
 
       <MaintenanceGatePass
-        maintenance={gpTicket}
+        maintenance={gpTicketDetail ?? gpTicket}
         open={!!gpTicket}
         onClose={() => setGpTicket(null)}
         createdBy={
-          gpTicket?.createdBy
-            ? `${gpTicket.createdBy.firstName} ${gpTicket.createdBy.lastName}`
+          gpTicketDetail?.createdBy
+            ? `${gpTicketDetail.createdBy.firstName} ${gpTicketDetail.createdBy.lastName}`
             : undefined
         }
         updatedBy={
-          gpTicket?.updatedBy
-            ? `${gpTicket.updatedBy.firstName} ${gpTicket.updatedBy.lastName}`
+          gpTicketDetail?.updatedBy
+            ? `${gpTicketDetail.updatedBy.firstName} ${gpTicketDetail.updatedBy.lastName}`
             : undefined
         }
         userLocation={userLocation}
         assetName={gpAssetName}
+        loading={gpTicketLoading}
       />
     </div>
   );
