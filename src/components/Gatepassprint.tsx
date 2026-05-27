@@ -116,13 +116,13 @@ interface GatePassCardProps {
   title: string;
   location?: string;
   createdBy?: string;
+  updatedBy?: string;
   refNo: string;
   accentHex: string;
   footerNote: string;
   fields: FieldDef[];
   printId: string;
   completedAt?: string | null;
-  /** When true, first signature label becomes "Issued By" instead of "Prepared By" */
   isCompleted?: boolean;
 }
 
@@ -131,14 +131,26 @@ interface GatePassCardProps {
 function SignatureBlock({
   label,
   createdBy,
+  updatedBy,
   accentHex,
   isFirst,
+  isCompleted,
 }: {
   label: string;
   createdBy?: string;
+  updatedBy?: string;
   accentHex: string;
   isFirst: boolean;
+  isCompleted?: boolean;
 }) {
+  // First block: completed → show updatedBy under "Issued By"
+  //              otherwise  → show createdBy under "Prepared By"
+  const nameToShow = isFirst
+    ? isCompleted
+      ? updatedBy
+      : createdBy
+    : undefined;
+
   return (
     <div
       className="rounded-b-sm px-3 pb-3 pt-2 sm:px-2 sm:pb-2 sm:pt-1"
@@ -154,18 +166,18 @@ function SignatureBlock({
         {label}
       </p>
 
-      {isFirst && createdBy && (
+      {isFirst && nameToShow && (
         <p className="mb-0 mt-1 text-xs font-bold text-[#1a1a1a] sm:text-[9px]">
-          {createdBy}
+          {nameToShow}
         </p>
       )}
 
       <div
         className="border-b border-[#ccc] pb-0.5"
-        style={{ marginTop: isFirst && createdBy ? 6 : 18 }}
+        style={{ marginTop: isFirst && nameToShow ? 6 : 18 }}
       />
       <p className="mt-0.5 text-[9px] text-[#777] sm:text-[7.5px] sm:text-[#bbb]">
-        {isFirst && createdBy ? "Signature / Date" : "Name / Signature / Date"}
+        {isFirst && nameToShow ? "Signature / Date" : "Name / Signature / Date"}
       </p>
     </div>
   );
@@ -177,6 +189,7 @@ function GatePassCard({
   title,
   location,
   createdBy,
+  updatedBy,
   refNo,
   accentHex,
   footerNote,
@@ -345,6 +358,8 @@ function GatePassCard({
             label={label}
             accentHex={accentHex}
             createdBy={createdBy}
+            updatedBy={updatedBy}
+            isCompleted={isCompleted}
             isFirst={i === 0}
           />
         ))}
@@ -475,7 +490,7 @@ export interface MaintenanceGatePassProps {
   open: boolean;
   onClose: () => void;
   createdBy?: string;
-  updatedBy?: string; // ← add
+  updatedBy?: string;
   userLocation?: string;
   assetName?: string;
 }
@@ -492,7 +507,7 @@ export function MaintenanceGatePass({
   open,
   onClose,
   createdBy,
-  updatedBy, // ← add
+  updatedBy,
   userLocation,
   assetName,
 }: MaintenanceGatePassProps) {
@@ -524,9 +539,13 @@ export function MaintenanceGatePass({
     ...(isCompleted
       ? [{ label: "Completed Date", value: m.completedDate ?? fmtDate() }]
       : []),
-    // ── Audit ──────────────────────────────────────────────────────────────
+    // ── Audit fields ───────────────────────────────────────────────────────
     ...(createdBy ? [{ label: "Created By", value: createdBy }] : []),
-    ...(updatedBy ? [{ label: "Last Updated By", value: updatedBy }] : []),
+    ...(updatedBy && isCompleted
+      ? [{ label: "Completed By", value: updatedBy }]
+      : updatedBy
+        ? [{ label: "Last Updated By", value: updatedBy }]
+        : []),
   ];
 
   const PRINT_ID = "maintenance-gate-pass-print";
@@ -554,6 +573,7 @@ export function MaintenanceGatePass({
             title="Maintenance Gate Pass"
             location={resolvedLocation !== "—" ? resolvedLocation : undefined}
             createdBy={createdBy}
+            updatedBy={updatedBy}
             refNo={m.ticketNo}
             accentHex="#c2410c"
             footerNote="Present this pass when collecting the repaired asset."
