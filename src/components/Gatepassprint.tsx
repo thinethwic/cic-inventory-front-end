@@ -475,6 +475,7 @@ export interface MaintenanceGatePassProps {
   open: boolean;
   onClose: () => void;
   createdBy?: string;
+  updatedBy?: string; // ← add
   userLocation?: string;
   assetName?: string;
 }
@@ -491,6 +492,7 @@ export function MaintenanceGatePass({
   open,
   onClose,
   createdBy,
+  updatedBy, // ← add
   userLocation,
   assetName,
 }: MaintenanceGatePassProps) {
@@ -522,6 +524,9 @@ export function MaintenanceGatePass({
     ...(isCompleted
       ? [{ label: "Completed Date", value: m.completedDate ?? fmtDate() }]
       : []),
+    // ── Audit ──────────────────────────────────────────────────────────────
+    ...(createdBy ? [{ label: "Created By", value: createdBy }] : []),
+    ...(updatedBy ? [{ label: "Last Updated By", value: updatedBy }] : []),
   ];
 
   const PRINT_ID = "maintenance-gate-pass-print";

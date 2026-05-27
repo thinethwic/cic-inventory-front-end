@@ -181,6 +181,9 @@ export type Maintenance = {
     notes?: string;
     location?: string;
     createdAt?: string;
+    // ── Audit ──────────────────────────────────────────────────────────
+    createdBy?: { id: number; firstName: string; lastName: string };
+    updatedBy?: { id: number; firstName: string; lastName: string };
 };
 
 export type MaintenanceFormState = {

@@ -1531,7 +1531,16 @@ export default function MaintenancePage() {
         maintenance={gpTicket}
         open={!!gpTicket}
         onClose={() => setGpTicket(null)}
-        createdBy={user?.fullName ?? "—"}
+        createdBy={
+          gpTicket?.createdBy
+            ? `${gpTicket.createdBy.firstName} ${gpTicket.createdBy.lastName}`
+            : (user?.fullName ?? "—")
+        }
+        updatedBy={
+          gpTicket?.updatedBy
+            ? `${gpTicket.updatedBy.firstName} ${gpTicket.updatedBy.lastName}`
+            : undefined
+        }
         userLocation={userLocation}
         assetName={gpAssetName}
       />
