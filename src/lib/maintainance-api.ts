@@ -40,15 +40,29 @@ async function apiFetch<T>(token: string, endpoint: string, init: RequestInit = 
 }
 
 export async function fetchMaintenanceById(
-    getToken: () => Promise<string | null>,
+    getToken: GetTokenFn,
     id: string,
 ): Promise<Maintenance> {
-    const token = await getToken();
-    const res = await fetch(`/api/v1/maintenances/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error("Failed to fetch maintenance ticket");
-    return res.json();
+    const token = await getAuthedToken(getToken);
+    const raw = await apiFetch<Record<string, unknown>>(token, `/maintenances/${id}`);
+    return fromBackendDetailRow(raw);
+}
+
+function fromBackendDetailRow(raw: Record<string, unknown>): Maintenance {
+    const base = fromBackendRow(raw);
+
+    const cb = raw.createdBy as Record<string, unknown> | undefined;
+    const ub = raw.updatedBy as Record<string, unknown> | undefined;
+
+    return {
+        ...base,
+        createdBy: cb
+            ? { id: Number(cb.id), firstName: (cb.firstName as string) ?? "", lastName: (cb.lastName as string) ?? "" }
+            : undefined,
+        updatedBy: ub
+            ? { id: Number(ub.id), firstName: (ub.firstName as string) ?? "", lastName: (ub.lastName as string) ?? "" }
+            : undefined,
+    };
 }
 
 function reqBody(payload: unknown): RequestInit { return { body: JSON.stringify(payload) }; }
@@ -95,11 +109,12 @@ function toBackendDto(dto: MaintenanceFormState): Record<string, unknown> {
 function fromBackendRow(raw: Record<string, unknown>): Maintenance {
     const asset = raw.asset as Record<string, unknown> | undefined;
     const supplier = raw.supplier as Record<string, unknown> | undefined;
+
     return {
         id: String(raw.id),
         ticketNo: (raw.ticketNo as string) ?? "",
         assetId: asset?.id != null ? String(asset.id) : String(raw.assetId ?? ""),
-        assetCode: (asset?.assetCode as string) ?? "",
+        assetCode: (asset?.assetCode as string) || (raw.assetCode as string) || "",
         supplierId: supplier?.id != null ? String(supplier.id) : undefined,
         supplierName: (supplier?.name as string) ?? undefined,
         issueTitle: (raw.issueTitle as string) ?? "",
