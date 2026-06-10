@@ -3,7 +3,7 @@ import { clearPersistedAuthSession, useAuth } from "@/lib/auth";
 import * as React from "react";
 import type { Asset, Employee, Location } from "@/types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const API_BASE = `${BASE_URL}/api/v1`;
 const JWT_TEMPLATE = "cic-inventory";
 

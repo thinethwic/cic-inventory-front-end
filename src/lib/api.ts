@@ -5,7 +5,7 @@ import { clearPersistedAuthSession } from "@/lib/auth";
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "https://cic-inventory-back-end.onrender.com";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 const ASSETS_ENDPOINT = `${BASE_URL}/api/v1/assets`;
 const LOCATIONS_ENDPOINT = `${BASE_URL}/api/v1/locations`;
 const JWT_TEMPLATE = "cic-inventory";
