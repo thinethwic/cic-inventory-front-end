@@ -55,6 +55,8 @@ import { ApiError } from "@/lib/http";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -210,7 +212,7 @@ const StatusBadge = React.memo(function StatusBadge({
 
   const className =
     status === "Damaged"
-      ? "bg-orange-500 text-white hover:bg-orange-600 border-transparent"
+      ? "bg-warning text-warning-foreground hover:bg-warning/90 border-transparent"
       : undefined;
 
   return (
@@ -402,8 +404,8 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
     const diffDays = Math.ceil((end.getTime() - now.getTime()) / 86_400_000);
     if (diffDays < 0) return { label: "Expired", color: "text-destructive" };
     if (diffDays <= 30)
-      return { label: `Expires in ${diffDays}d`, color: "text-amber-500" };
-    return { label: "Active", color: "text-green-600" };
+      return { label: `Expires in ${diffDays}d`, color: "text-warning" };
+    return { label: "Active", color: "text-success" };
   })();
 
   return (
@@ -696,8 +698,7 @@ const PaginationControls = React.memo(function PaginationControls({
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(1)}
             disabled={page === 1}
@@ -707,8 +708,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page - 1)}
             disabled={page === 1}
@@ -721,8 +721,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </span>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= safeTotalPages}
@@ -732,8 +731,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(safeTotalPages)}
             disabled={page >= safeTotalPages}
@@ -1627,12 +1625,20 @@ export default function Assets() {
     try {
       let assetId: string;
       if (wasEditing) {
-        await update(editingId, payload);
+        const updatedAsset = await update(editingId, payload);
         assetId = editingId;
+        // Patch the row in place immediately — loadPage() below still runs
+        // in the background to reconcile with the server, but the table
+        // never has to blank out and re-render from scratch.
+        setAllAssets((prev) =>
+          prev.map((a) => (a.id === assetId ? updatedAsset : a)),
+        );
       } else {
         const createdAsset = await create(payload);
         assetId = createdAsset.id;
         setPage(1);
+        setAllAssets((prev) => [createdAsset, ...prev]);
+        setTotalElements((prev) => prev + 1);
       }
 
       if (stagedAttachments.length > 0) {
@@ -1660,7 +1666,10 @@ export default function Assets() {
         );
       }
 
-      await loadPage();
+      // Reconcile with the server in the background — the table is already
+      // showing the right content, so this just dims briefly rather than
+      // blanking out while it re-syncs pagination/sort/filter truth.
+      void loadPage();
 
       toast.success(wasEditing ? "Asset updated" : "Asset created", {
         description: `${payload.assetCode} — ${[payload.brand, payload.model].filter(Boolean).join(" ")}`,
@@ -1709,14 +1718,19 @@ export default function Assets() {
       await remove(deleteId);
       setDeleteId(null);
       setDeleteError(null);
-      await loadPage();
 
-      // ← NEW
+      // Remove the row immediately — no need to wait for a refetch to show
+      // the deletion took effect. loadPage() still runs in the background
+      // to reconcile totals/pagination (dims briefly, doesn't blank).
+      const newTotal = allAssets.length - 1;
+      setAllAssets((prev) => prev.filter((a) => a.id !== deleteId));
+      setTotalElements((prev) => Math.max(prev - 1, 0));
+      void loadPage();
+
       toast.success("Asset deleted");
 
       if (page > 1) {
         setPage((p) => {
-          const newTotal = allAssets.length - 1;
           const maxPage = Math.max(Math.ceil(newTotal / pageSize), 1);
           return p > maxPage ? maxPage : p;
         });
@@ -1848,46 +1862,43 @@ export default function Assets() {
         </div>
       </div>
 
-      {/* ── Scan Card ── */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ScanLine className="h-4 w-4" /> Barcode / QR Scan
-          </CardTitle>
-        </CardHeader>
+      {/* ── Scan Bar ── */}
+      <div className="flex flex-col gap-2 rounded-md border bg-card px-4 py-2.5 md:flex-row md:items-center">
+        <div className="flex flex-1 items-center gap-2">
+          <ScanLine className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <Input
+            ref={scanRef}
+            value={scanValue}
+            onChange={(e) => setScanValue(e.target.value)}
+            onKeyDown={onScanKeyDown}
+            placeholder="Scan barcode / serial / asset code and press Enter…"
+            disabled={scanLoading}
+            className="h-8 border-none px-0 shadow-none focus-visible:ring-0"
+          />
+        </div>
 
-        <CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
-          <div className="flex-1 space-y-1">
-            <div className="text-xs text-muted-foreground">
-              Scan barcode (barcode / serial / asset code) and press Enter.
-            </div>
-            <Input
-              ref={scanRef}
-              value={scanValue}
-              onChange={(e) => setScanValue(e.target.value)}
-              onKeyDown={onScanKeyDown}
-              placeholder="Scan here..."
-              disabled={scanLoading}
-            />
-          </div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={scanLoading || !scanValue.trim()}
+            onClick={handleFindClick}
+          >
+            {scanLoading && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            Find
+          </Button>
 
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={scanLoading || !scanValue.trim()}
-              onClick={handleFindClick}
-            >
-              {scanLoading && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Find
-            </Button>
-
-            <Button type="button" variant="outline" onClick={handleFocusScan}>
-              Focus Scan
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleFocusScan}
+          >
+            Focus Scan
+          </Button>
+        </div>
+      </div>
 
       {/* ── Filters Card ── */}
       <Card>
@@ -1904,7 +1915,7 @@ export default function Assets() {
           )}
         >
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Search</div>
+            <Label className="text-xs text-muted-foreground">Search</Label>
             <Input
               value={qRaw}
               onChange={(e) => setQRaw(e.target.value)}
@@ -1913,7 +1924,7 @@ export default function Assets() {
           </div>
 
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Status</div>
+            <Label className="text-xs text-muted-foreground">Status</Label>
             <Select
               value={statusFilter}
               onValueChange={(v) => setStatusFilter(v as AssetStatus | "All")}
@@ -1933,7 +1944,7 @@ export default function Assets() {
           </div>
 
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Category</div>
+            <Label className="text-xs text-muted-foreground">Category</Label>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger>
                 <SelectValue placeholder="Select category" />
@@ -1951,7 +1962,7 @@ export default function Assets() {
 
           {isAdmin && (
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Supplier</div>
+              <Label className="text-xs text-muted-foreground">Supplier</Label>
               <SearchCombobox
                 value={supplierFilter}
                 onValueChange={setSupplierFilter}
@@ -1964,7 +1975,7 @@ export default function Assets() {
           )}
           {isAdmin && (
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Location</div>
+              <Label className="text-xs text-muted-foreground">Location</Label>
               <SearchCombobox
                 value={locationFilter}
                 onValueChange={setLocationFilter}
@@ -1982,11 +1993,14 @@ export default function Assets() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">
+            <CardTitle className="flex items-center gap-2 text-base">
               Asset List{" "}
               <span className="text-muted-foreground">
                 ({totalElements})
               </span>
+              {pageLoading && allAssets.length > 0 && (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+              )}
             </CardTitle>
             {sortKey && (
               <Button
@@ -2003,7 +2017,10 @@ export default function Assets() {
         </CardHeader>
 
         <CardContent className="p-0">
-          <div className="mx-6 rounded-t-md border-x border-t">
+          <div
+            className="mx-6 overflow-x-auto rounded-md border"
+            data-slot="table-container"
+          >
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2063,23 +2080,59 @@ export default function Assets() {
                 </TableRow>
               </TableHeader>
 
-              <TableBody>
-                {pageLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="py-10 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Loading
-                        assets...
-                      </div>
-                    </TableCell>
-                  </TableRow>
+              <TableBody
+                className={cn(
+                  pageLoading &&
+                    allAssets.length > 0 &&
+                    "pointer-events-none opacity-60 transition-opacity",
+                )}
+              >
+                {pageLoading && allAssets.length === 0 ? (
+                  Array.from({ length: Math.min(pageSize, 10) }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-28" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-20 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell>
+                          <Skeleton className="h-4 w-24" />
+                        </TableCell>
+                      )}
+                      <TableCell className="text-right">
+                        <Skeleton className="ml-auto h-8 w-8 rounded-md" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : filteredAssets.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={9}
-                      className="py-10 text-center text-muted-foreground"
+                      className="py-12 text-center text-muted-foreground"
                     >
-                      No assets found.
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                          <Package className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <p>No assets found.</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -2089,10 +2142,10 @@ export default function Assets() {
                       className="cursor-pointer transition-colors hover:bg-muted/50"
                       onClick={() => handleRowClick(a)}
                     >
-                      <TableCell className="font-medium">
+                      <TableCell className="font-mono text-xs font-medium">
                         {a.assetCode}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="font-mono text-xs text-muted-foreground">
                         {a.barcode || "-"}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
@@ -2101,7 +2154,7 @@ export default function Assets() {
                       <TableCell className="text-muted-foreground">
                         {a.brand} {a.model}
                       </TableCell>
-                      <TableCell className="text-muted-foreground">
+                      <TableCell className="font-mono text-xs text-muted-foreground">
                         {a.serialNo}
                       </TableCell>
                       <TableCell>
@@ -2175,9 +2228,7 @@ export default function Assets() {
                 )}
               </TableBody>
             </Table>
-          </div>
 
-          <div className="mx-6 rounded-b-md border-x border-b">
             <PaginationControls
               total={totalElements}
               page={page}
@@ -2228,9 +2279,9 @@ export default function Assets() {
             <div className="grid gap-3 sm:grid-cols-2">
               {/* Asset Code */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Asset Code *
-                </div>
+                </Label>
                 <Input
                   value={form.assetCode}
                   onChange={(e) =>
@@ -2243,9 +2294,9 @@ export default function Assets() {
 
               {/* Barcode */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Barcode (optional)
-                </div>
+                </Label>
                 <Input
                   value={form.barcode ?? ""}
                   onChange={(e) =>
@@ -2258,7 +2309,7 @@ export default function Assets() {
 
               {/* Category */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Category</div>
+                <Label className="text-xs text-muted-foreground">Category</Label>
                 <Select
                   value={form.category}
                   onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
@@ -2290,7 +2341,7 @@ export default function Assets() {
 
               {/* Status */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Status</div>
+                <Label className="text-xs text-muted-foreground">Status</Label>
                 <Select
                   value={form.status}
                   onValueChange={(v) =>
@@ -2313,7 +2364,7 @@ export default function Assets() {
 
               {/* Brand */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Brand</div>
+                <Label className="text-xs text-muted-foreground">Brand</Label>
                 <Input
                   value={form.brand}
                   onChange={(e) =>
@@ -2326,7 +2377,7 @@ export default function Assets() {
 
               {/* Model */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Model</div>
+                <Label className="text-xs text-muted-foreground">Model</Label>
                 <Input
                   value={form.model}
                   onChange={(e) =>
@@ -2339,7 +2390,7 @@ export default function Assets() {
 
               {/* Serial No */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Serial No *</div>
+                <Label className="text-xs text-muted-foreground">Serial No *</Label>
                 <Input
                   value={form.serialNo}
                   onChange={(e) =>
@@ -2352,7 +2403,7 @@ export default function Assets() {
 
               {/* Location — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <div className="text-xs text-muted-foreground">Location *</div>
+                <Label className="text-xs text-muted-foreground">Location *</Label>
                 <LocationCombobox
                   locations={locations}
                   value={form.locationId || ""}
@@ -2364,9 +2415,9 @@ export default function Assets() {
 
               {/* Assigned To — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Assigned To (optional)
-                </div>
+                </Label>
                 <EmployeeCombobox
                   employees={employees}
                   value={
@@ -2385,7 +2436,7 @@ export default function Assets() {
 
               {/* Supplier — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <div className="text-xs text-muted-foreground">Supplier *</div>
+                <Label className="text-xs text-muted-foreground">Supplier *</Label>
                 <SupplierCombobox
                   suppliers={suppliers}
                   value={form.supplierId?.trim() ? form.supplierId : ""}
@@ -2397,9 +2448,9 @@ export default function Assets() {
 
               {/* Purchase Date */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Purchase Date (optional)
-                </div>
+                </Label>
                 <Input
                   type="date"
                   value={form.purchaseDate ?? ""}
@@ -2412,9 +2463,9 @@ export default function Assets() {
 
               {/* Warranty End */}
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Warranty End (optional)
-                </div>
+                </Label>
                 <Input
                   type="date"
                   value={form.warrantyEnd ?? ""}

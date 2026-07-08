@@ -10,18 +10,20 @@ import {
   Eye,
   QrCode,
   FileDown,
-  Loader2,
   Repeat,
   Clipboard,
   ChevronLeft,
   ChevronRight,
   Download,
+  Inbox,
+  ShieldAlert,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -340,7 +342,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <Skeleton className="h-8 w-14" />
                 ) : (
                   <div className="text-2xl font-bold">{k.value}</div>
                 )}
@@ -419,11 +421,47 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             {activityLoading ? (
-              <div className="flex items-center justify-center py-10">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Asset</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Detail</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell>
+                        <Skeleton className="h-4 w-28" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-32" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-14" />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Skeleton className="ml-auto h-5 w-16 rounded-full" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             ) : activity.length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">
+              <div className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                  <Inbox className="h-5 w-5 text-muted-foreground" />
+                </div>
                 No recent activity found.
               </div>
             ) : (
@@ -506,9 +544,8 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2">
                       <Button
                         variant="outline"
-                        size="icon"
+                        size="icon-sm"
                         type="button"
-                        className="h-8 w-8"
                         disabled={activityPage === 1}
                         onClick={() =>
                           setActivityPage((prev) => Math.max(prev - 1, 1))
@@ -523,9 +560,8 @@ export default function DashboardPage() {
 
                       <Button
                         variant="outline"
-                        size="icon"
+                        size="icon-sm"
                         type="button"
-                        className="h-8 w-8"
                         disabled={activityPage === activityTotalPages}
                         onClick={() =>
                           setActivityPage((prev) =>
@@ -566,13 +602,18 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <div className="space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-14 w-full rounded-lg" />
+                ))}
               </div>
             ) : warrantyExpiring.length === 0 ? (
-              <p className="py-6 text-center text-sm text-muted-foreground">
+              <div className="flex flex-col items-center gap-2 py-6 text-center text-sm text-muted-foreground">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                  <ShieldAlert className="h-5 w-5 text-muted-foreground" />
+                </div>
                 No warranties expiring in the next 60 days.
-              </p>
+              </div>
             ) : (
               warrantyExpiring.map((w) => (
                 <div key={w.assetCode} className="rounded-lg border p-3">
