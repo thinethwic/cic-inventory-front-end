@@ -39,10 +39,9 @@ import {
 } from "@/components/ui/select";
 import { Link } from "react-router-dom";
 
-import { fetchAssets } from "@/lib/api";
+import { fetchDashboardStats, type DashboardStats } from "@/lib/api";
 import { fetchAssetTransfers } from "@/lib/asset-transfer-api";
 import { useMaintenanceApi } from "@/lib/maintainance-api";
-import type { Asset } from "@/types";
 import type { Maintenance } from "@/types";
 import type { AssetTransferResponse } from "@/lib/asset-transfer-api";
 
@@ -149,45 +148,6 @@ function StatusBadge({ status }: { status: ActivityStatus }) {
   return <Badge variant="destructive">Cancelled</Badge>;
 }
 
-// ─── KPI helpers ──────────────────────────────────────────────────────────────
-interface KpiStats {
-  total: number;
-  assigned: number;
-  inRepair: number;
-  disposed: number;
-}
-
-function computeStats(assets: Asset[]): KpiStats {
-  return {
-    total: assets.length,
-    assigned: assets.filter((a) => a.status === "Assigned").length,
-    inRepair: assets.filter((a) => a.status === "In Repair").length,
-    disposed: assets.filter((a) => a.status === "Disposed").length,
-  };
-}
-
-function getWarrantyExpiring(assets: Asset[]) {
-  const today = new Date();
-  return assets
-    .filter((a) => {
-      if (!a.warrantyEnd) return false;
-      const end = new Date(a.warrantyEnd);
-      const diffDays = Math.ceil(
-        (end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      return diffDays > 0 && diffDays <= 60;
-    })
-    .map((a) => ({
-      assetCode: a.assetCode,
-      model: `${a.brand} ${a.model}`.trim(),
-      days: Math.ceil(
-        (new Date(a.warrantyEnd!).getTime() - today.getTime()) /
-          (1000 * 60 * 60 * 24),
-      ),
-    }))
-    .sort((a, b) => a.days - b.days)
-    .slice(0, 5);
-}
 
 // ─── Dashboard Page ───────────────────────────────────────────────────────────
 export default function DashboardPage() {
@@ -198,7 +158,13 @@ export default function DashboardPage() {
   const { role } = usePermissions();
   const isAdmin = hasRole(role, ["admin", "admin_user"]);
 
-  const [assets, setAssets] = React.useState<Asset[]>([]);
+  const [stats, setStats] = React.useState<DashboardStats>({
+    total: 0,
+    assigned: 0,
+    inRepair: 0,
+    disposed: 0,
+    warrantyExpiring: [],
+  });
   const [activity, setActivity] = React.useState<Activity[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [activityLoading, setActivityLoading] = React.useState(true);
@@ -212,25 +178,23 @@ export default function DashboardPage() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Fetch assets ───────────────────────────────────────────────────────────
+  // ── Fetch dashboard stats (server-computed counts, not the full asset list) ─
   React.useEffect(() => {
     let cancelled = false;
     if (!isLoaded) return;
 
     const load = async () => {
       if (!isSignedIn) {
-        setAssets([]);
         setLoading(false);
         return;
       }
 
       setLoading(true);
       try {
-        const data = await fetchAssets(getToken);
-        if (!cancelled) setAssets(Array.isArray(data) ? data : []);
+        const data = await fetchDashboardStats(getToken);
+        if (!cancelled) setStats(data);
       } catch (err) {
-        console.error("fetchAssets failed:", err);
-        if (!cancelled) setAssets([]);
+        console.error("fetchDashboardStats failed:", err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -287,11 +251,7 @@ export default function DashboardPage() {
     };
   }, [isLoaded, isSignedIn, getToken, getAllMaintenance, isAdmin]);
 
-  const stats = React.useMemo(() => computeStats(assets), [assets]);
-  const warrantyExpiring = React.useMemo(
-    () => getWarrantyExpiring(assets),
-    [assets],
-  );
+  const warrantyExpiring = stats.warrantyExpiring;
 
   const kpis = [
     { label: "Total Assets", value: stats.total, icon: Laptop },

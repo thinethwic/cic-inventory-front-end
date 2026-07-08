@@ -1,6 +1,7 @@
 // src/lib/maintainance-api.ts
 import * as React from "react";
 import { clearPersistedAuthSession, useAuth } from "@/lib/auth";
+import { parseJsonOrThrow } from "@/lib/http";
 import type { Asset, Supplier } from "@/types";
 import type {
     Maintenance,
@@ -28,15 +29,7 @@ async function apiFetch<T>(token: string, endpoint: string, init: RequestInit = 
     if (res.status === 401) {
         clearPersistedAuthSession();
     }
-    if (res.status === 204) return undefined as T;
-    const contentType = res.headers.get("content-type") ?? "";
-    const isJson = contentType.includes("application/json");
-    if (!res.ok) {
-        if (isJson) { const body = await res.json().catch(() => ({})); throw new Error(`API ${res.status}: ${body?.message ?? body?.error ?? JSON.stringify(body)}`); }
-        throw new Error(`API ${res.status} — backend returned non-JSON response.`);
-    }
-    if (!isJson) throw new Error(`Expected JSON from ${url} but got "${contentType}".`);
-    return res.json() as Promise<T>;
+    return parseJsonOrThrow<T>(res);
 }
 
 export async function fetchMaintenanceById(

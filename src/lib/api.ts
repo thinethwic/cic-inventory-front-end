@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useAuth } from "@/lib/auth";
 import { clearPersistedAuthSession } from "@/lib/auth";
+import { parseJsonOrThrow } from "@/lib/http";
 import type { Asset, AssetFormState, AssetStatus } from "@/types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -60,6 +61,9 @@ export interface FetchAssetsParams {
     search?: string;
     status?: string;
     category?: string;
+    location?: string;
+    supplier?: string;
+    sort?: string;
 }
 
 export interface AssetsPage {
@@ -187,13 +191,16 @@ function toRequestBody(form: AssetFormState) {
 
 // ─── Query-string builder ─────────────────────────────────────────────────────
 function buildPageParams(params: FetchAssetsParams): URLSearchParams {
-    const { page = 0, size = 25, search, status, category } = params;
+    const { page = 0, size = 25, search, status, category, location, supplier, sort } = params;
     const qs = new URLSearchParams();
     qs.set("page", String(page));
     qs.set("size", String(size));
     if (search?.trim()) qs.set("search", search.trim());
     if (status && status !== "All") qs.set("status", STATUS_TO_BACKEND[status] ?? status);
     if (category && category !== "All") qs.set("category", CATEGORY_TO_BACKEND[category] ?? category);
+    if (location && location !== "All") qs.set("location", location);
+    if (supplier && supplier !== "All") qs.set("supplier", supplier);
+    if (sort) qs.set("sort", sort);
     return qs;
 }
 
@@ -202,21 +209,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 401) {
         clearPersistedAuthSession();
     }
-    if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        let message = `Request failed with status ${res.status}`;
-        if (text) {
-            try {
-                const json = JSON.parse(text);
-                message = json.message ?? json.error ?? text;
-            } catch {
-                message = text;
-            }
-        }
-        throw new Error(message);
-    }
-    if (res.status === 204) return undefined as T;
-    return res.json() as Promise<T>;
+    return parseJsonOrThrow<T>(res);
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -281,6 +274,53 @@ function resolveAssignedToId(
         return assignedTo.id;
     }
     return null;
+}
+
+// ─── Dashboard stats (server-computed, avoids fetching every asset row) ───────
+export interface WarrantyExpiringItem {
+    assetCode: string;
+    model: string;
+    days: number;
+}
+
+export interface DashboardStats {
+    total: number;
+    assigned: number;
+    inRepair: number;
+    disposed: number;
+    warrantyExpiring: WarrantyExpiringItem[];
+}
+
+interface RawDashboardStats {
+    total: number;
+    assigned: number;
+    inRepair: number;
+    disposed: number;
+    warrantyExpiring: Array<{
+        assetCode: string;
+        brand: string;
+        model: string;
+        warrantyEnd: string;
+    }>;
+}
+
+export async function fetchDashboardStats(getToken: GetTokenFn): Promise<DashboardStats> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/dashboard-stats`);
+    const data = await handleResponse<RawDashboardStats>(res);
+    const today = new Date();
+    return {
+        total: data.total,
+        assigned: data.assigned,
+        inRepair: data.inRepair,
+        disposed: data.disposed,
+        warrantyExpiring: (data.warrantyExpiring ?? []).map((w) => ({
+            assetCode: w.assetCode,
+            model: `${w.brand ?? ""} ${w.model ?? ""}`.trim(),
+            days: Math.ceil(
+                (new Date(w.warrantyEnd).getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+            ),
+        })),
+    };
 }
 
 // ─── Standalone exports (backward compatible) ─────────────────────────────────

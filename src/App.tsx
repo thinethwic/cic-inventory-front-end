@@ -15,9 +15,7 @@ const UsersPage = lazy(() => import("./Pages/UsersPage"));
 const MaintenancePage = lazy(() => import("./Pages/Maintenance"));
 const ReportsPage = lazy(() => import("./Pages/Reports"));
 const AssetTransfer = lazy(() => import("./Pages/AssetTransfer"));
-const UnderConstructionPage = lazy(
-  () => import("./Pages/components/UnderConstructionPage"),
-);
+const SettingsPage = lazy(() => import("./Pages/Settings"));
 
 function PageLoader() {
   return (
@@ -82,7 +80,7 @@ export default function App() {
           path="settings"
           element={
             <LazyPage>
-              <UnderConstructionPage />
+              <SettingsPage />
             </LazyPage>
           }
         />

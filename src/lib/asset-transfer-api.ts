@@ -1,5 +1,6 @@
 // src/lib/asset-transfer-api.ts
 import { clearPersistedAuthSession, useAuth } from "@/lib/auth";
+import { parseJsonOrThrow } from "@/lib/http";
 import * as React from "react";
 import type { Asset, Employee, Location } from "@/types";
 
@@ -112,23 +113,7 @@ export async function apiFetch<T>(
         clearPersistedAuthSession();
     }
 
-    if (res.status === 204) return undefined as T;
-
-    const contentType = res.headers.get("content-type") ?? "";
-    const isJson = contentType.includes("application/json");
-
-    if (!res.ok) {
-        if (isJson) {
-            const body = await res.json().catch(() => ({}));
-            const msg = body?.message ?? body?.error ?? `HTTP ${res.status}`;
-            throw new Error(msg);
-        }
-        const text = await res.text().catch(() => "");
-        throw new Error(`API ${res.status}: ${text || "Non-JSON response"}`);
-    }
-
-    if (!isJson) throw new Error(`Expected JSON but received ${contentType}`);
-    return res.json() as Promise<T>;
+    return parseJsonOrThrow<T>(res);
 }
 
 // ─── Fetch all pages helper ───────────────────────────────────────────────────

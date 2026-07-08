@@ -44,10 +44,13 @@ import {
 } from "@/components/ui/command";
 
 import { AssetGatePass } from "@/components/Gatepassprint";
+import { AssetAttachments } from "@/Pages/components/AssetAttachments";
 
 import { useAuth } from "@/lib/auth";
 import { useManagementApi } from "@/lib/management-api";
 import { useAssetApi } from "@/lib/api";
+import { useAssetAttachmentApi } from "@/lib/asset-attachment-api";
+import { ApiError } from "@/lib/http";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -144,21 +147,6 @@ type SortKey =
   | "supplierName";
 
 type SortDir = "asc" | "desc";
-
-function sortAssets(
-  assets: Asset[],
-  key: SortKey | null,
-  dir: SortDir,
-): Asset[] {
-  if (!key) return assets;
-  return [...assets].sort((a, b) => {
-    const av = (a[key] ?? "").toString().toLowerCase();
-    const bv = (b[key] ?? "").toString().toLowerCase();
-    if (av < bv) return dir === "asc" ? -1 : 1;
-    if (av > bv) return dir === "asc" ? 1 : -1;
-    return 0;
-  });
-}
 
 // ─── Sortable column header ───────────────────────────────────────────────────
 interface SortableHeadProps {
@@ -582,6 +570,23 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
               </div>
             </div>
           </div>
+
+          {isAdmin && (
+            <>
+              <Separator />
+              <div className="px-6 py-5">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Attachments
+                </p>
+                <AssetAttachments
+                  assetId={asset.id}
+                  stagedFiles={[]}
+                  onStagedFilesChange={() => {}}
+                  readOnly
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Footer actions */}
@@ -1296,9 +1301,12 @@ export default function Assets() {
 
   const { isLoaded, isSignedIn } = useAuth();
   const managementApi = useManagementApi();
-  const { getAll, getByScan, create, update, remove } = useAssetApi();
+  const { getPage, getByScan, create, update, remove } = useAssetApi();
+  const { upload: uploadAttachment } = useAssetAttachmentApi();
 
   const [allAssets, setAllAssets] = React.useState<Asset[]>([]);
+  const [totalElements, setTotalElements] = React.useState(0);
+  const [serverTotalPages, setServerTotalPages] = React.useState(1);
 
   const [locations, setLocations] = React.useState<Location[]>([]);
   const [employees, setEmployees] = React.useState<Employee[]>([]);
@@ -1341,6 +1349,7 @@ export default function Assets() {
   const [openForm, setOpenForm] = React.useState(false);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<AssetFormState>(emptyAssetForm);
+  const [stagedAttachments, setStagedAttachments] = React.useState<File[]>([]);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
@@ -1356,7 +1365,26 @@ export default function Assets() {
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
 
-  // ── Fetch ALL assets ────────────────────────────────────────────────────────
+  // Maps the table's sortable columns to the JPA property path the backend
+  // understands (Spring's Pageable sort binding resolves nested paths like
+  // "location.name" the same way derived query methods do).
+  const sortParam = React.useMemo(() => {
+    if (!sortKey) return undefined;
+    const fieldMap: Record<SortKey, string> = {
+      assetCode: "assetCode",
+      category: "category",
+      brand: "brand",
+      serialNo: "serialNo",
+      status: "status",
+      location: "location.name",
+      supplierName: "supplier.name",
+    };
+    return `${fieldMap[sortKey]},${sortDir}`;
+  }, [sortKey, sortDir]);
+
+  // ── Fetch the current page from the server (search/status/category/location/
+  // supplier/sort are all applied server-side so the table stays fast as the
+  // asset table grows, instead of pulling up to 1000 rows on every load) ──────
   const loadPage = React.useCallback(async () => {
     if (!isLoaded || !isSignedIn) {
       setAllAssets([]);
@@ -1369,16 +1397,26 @@ export default function Assets() {
     setPageLoading(true);
 
     try {
-      const assetList = await getAll();
-      const assets = Array.isArray(assetList) ? assetList : [];
-      setAllAssets(assets);
+      const result = await getPage({
+        page: page - 1,
+        size: pageSize,
+        search: q,
+        status: statusFilter,
+        category: categoryFilter,
+        location: locationFilter,
+        supplier: supplierFilter,
+        sort: sortParam,
+      });
+      setAllAssets(result.content);
+      setTotalElements(result.totalElements);
+      setServerTotalPages(Math.max(result.totalPages, 1));
 
-      const dbCategories = assets
+      const dbCategories = result.content
         .map((a) => a.category?.trim())
         .filter((c): c is string => !!c);
-      setAllCategoryOptions(
-        Array.from(new Set([...categoryOptions, ...dbCategories])).sort(
-          (a, b) => a.localeCompare(b),
+      setAllCategoryOptions((prev) =>
+        Array.from(new Set([...prev, ...dbCategories])).sort((a, b) =>
+          a.localeCompare(b),
         ),
       );
     } catch (err) {
@@ -1388,7 +1426,19 @@ export default function Assets() {
       setPageLoading(false);
       loadingRef.current = false;
     }
-  }, [isLoaded, isSignedIn, getAll]);
+  }, [
+    isLoaded,
+    isSignedIn,
+    getPage,
+    page,
+    pageSize,
+    q,
+    statusFilter,
+    categoryFilter,
+    locationFilter,
+    supplierFilter,
+    sortParam,
+  ]);
 
   React.useEffect(() => {
     loadPage();
@@ -1441,95 +1491,38 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
-  // ── Derived supplier options for filter ────────────────────────────────────
+  // ── Derived supplier/location options for filter dropdowns ─────────────────
+  // Sourced from the independently-loaded master lists (not the current asset
+  // page) so the dropdowns list every supplier/location, not just the ones
+  // that happen to appear on the page currently being viewed.
   const supplierOptions = React.useMemo(
     () =>
       Array.from(
-        new Set(
-          allAssets
-            .map((a) => a.supplierName?.trim())
-            .filter((s): s is string => !!s),
-        ),
+        new Set(suppliers.map((s) => s.name?.trim()).filter((s): s is string => !!s)),
       ).sort(),
-    [allAssets],
+    [suppliers],
   );
 
-  // ── Derived location options for filter ────────────────────────────────────
   const locationOptions = React.useMemo(
     () =>
       Array.from(
-        new Set(
-          allAssets
-            .map((a) => a.location?.trim())
-            .filter((l): l is string => !!l),
-        ),
+        new Set(locations.map((l) => l.name?.trim()).filter((l): l is string => !!l)),
       ).sort(),
-    [allAssets],
+    [locations],
   );
 
-  // ── Filter + sort ──────────────────────────────────────────────────────────
-  const filteredAssets = React.useMemo(() => {
-    const searchText = q.trim().toLowerCase();
-
-    const filtered = allAssets.filter((asset) => {
-      const matchesSearch =
-        !searchText ||
-        asset.assetCode?.toLowerCase().includes(searchText) ||
-        asset.barcode?.toLowerCase().includes(searchText) ||
-        asset.serialNo?.toLowerCase().includes(searchText) ||
-        asset.brand?.toLowerCase().includes(searchText) ||
-        asset.model?.toLowerCase().includes(searchText) ||
-        asset.category?.toLowerCase().includes(searchText) ||
-        asset.location?.toLowerCase().includes(searchText) ||
-        asset.assignedTo?.toLowerCase().includes(searchText) ||
-        asset.supplierName?.toLowerCase().includes(searchText);
-
-      const matchesStatus =
-        statusFilter === "All" || asset.status === statusFilter;
-      const matchesCategory =
-        categoryFilter === "All" || asset.category === categoryFilter;
-      const matchesSupplier =
-        supplierFilter === "All" ||
-        asset.supplierName?.trim() === supplierFilter;
-      const matchesLocation =
-        locationFilter === "All" ||
-        asset.location?.trim().toLowerCase() ===
-          locationFilter.trim().toLowerCase();
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesCategory &&
-        matchesSupplier &&
-        matchesLocation
-      );
-    });
-
-    return sortAssets(filtered, sortKey, sortDir);
-  }, [
-    allAssets,
-    q,
-    statusFilter,
-    categoryFilter,
-    supplierFilter,
-    locationFilter,
-    sortKey,
-    sortDir,
-  ]);
-
-  const totalFilteredPages = Math.max(
-    Math.ceil(filteredAssets.length / pageSize),
-    1,
-  );
+  // Search/status/category/location/supplier/sort are all applied server-side
+  // (see loadPage above), so the current page's content is already the final
+  // filtered + sorted + paginated result — no client-side re-filtering here.
+  const filteredAssets = allAssets;
+  const totalFilteredPages = serverTotalPages;
 
   React.useEffect(() => {
     setPage(1);
   }, [q, statusFilter, categoryFilter, supplierFilter, locationFilter]);
 
-  const pagedAssets = React.useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredAssets.slice(start, start + pageSize);
-  }, [filteredAssets, page, pageSize]);
+  // Already the current page from the server — no client-side slicing needed.
+  const pagedAssets = filteredAssets;
 
   // ── Detail sheet ───────────────────────────────────────────────────────────
   const openDetail = React.useCallback((asset: Asset) => {
@@ -1546,6 +1539,7 @@ export default function Assets() {
     setEditingId(null);
     setForm(emptyAssetForm);
     setCustomCategory("");
+    setStagedAttachments([]);
     setSaveError(null);
     setOpenForm(true);
   }, []);
@@ -1586,6 +1580,7 @@ export default function Assets() {
       });
 
       setCustomCategory(isPredefinedCategory ? "" : existingCategory);
+      setStagedAttachments([]);
       setSaveError(null);
       setOpenForm(true);
     },
@@ -1594,6 +1589,8 @@ export default function Assets() {
 
   const validateForm = React.useCallback((): string | null => {
     if (!form.assetCode.trim()) return "Asset code is required.";
+    if (!form.brand.trim()) return "Brand is required.";
+    if (!form.model.trim()) return "Model is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
     if (!form.supplierId?.trim()) return "Supplier is required.";
@@ -1625,13 +1622,36 @@ export default function Assets() {
         : form.category;
 
     const payload: AssetFormState = { ...form, category: finalCategory };
+    const wasEditing = !!editingId;
 
     try {
-      if (editingId) {
+      let assetId: string;
+      if (wasEditing) {
         await update(editingId, payload);
+        assetId = editingId;
       } else {
-        await create(payload);
+        const createdAsset = await create(payload);
+        assetId = createdAsset.id;
         setPage(1);
+      }
+
+      if (stagedAttachments.length > 0) {
+        let failures = 0;
+        for (const file of stagedAttachments) {
+          try {
+            await uploadAttachment(assetId, file);
+          } catch (attachErr) {
+            failures += 1;
+            console.error("attachment upload failed:", attachErr);
+          }
+        }
+        if (failures > 0) {
+          toast.error(
+            failures === stagedAttachments.length
+              ? "Failed to upload attachments"
+              : `${failures} of ${stagedAttachments.length} attachments failed to upload`,
+          );
+        }
       }
 
       if (finalCategory && !allCategoryOptions.includes(finalCategory)) {
@@ -1640,21 +1660,24 @@ export default function Assets() {
         );
       }
 
+      await loadPage();
+
+      toast.success(wasEditing ? "Asset updated" : "Asset created", {
+        description: `${payload.assetCode} — ${[payload.brand, payload.model].filter(Boolean).join(" ")}`,
+      });
+
       setOpenForm(false);
       setForm(emptyAssetForm);
       setCustomCategory("");
-      await loadPage();
-
-      // ← NEW
-      toast.success(editingId ? "Asset updated" : "Asset created", {
-        description: `${payload.assetCode} — ${[payload.brand, payload.model].filter(Boolean).join(" ")}`,
-      });
+      setStagedAttachments([]);
     } catch (e) {
       console.error("save asset failed:", e);
       const msg =
-        e instanceof Error
-          ? e.message
-          : "Failed to save asset. Please try again.";
+        e instanceof ApiError && e.validationErrors && Object.keys(e.validationErrors).length > 0
+          ? Object.values(e.validationErrors).join(" ")
+          : e instanceof Error
+            ? e.message
+            : "Failed to save asset. Please try again.";
       setSaveError(msg);
       toast.error("Save failed", { description: msg }); // ← NEW
     } finally {
@@ -1669,6 +1692,8 @@ export default function Assets() {
     editingId,
     update,
     create,
+    stagedAttachments,
+    uploadAttachment,
     allCategoryOptions,
     loadPage,
   ]);
@@ -1960,7 +1985,7 @@ export default function Assets() {
             <CardTitle className="text-base">
               Asset List{" "}
               <span className="text-muted-foreground">
-                ({filteredAssets.length})
+                ({totalElements})
               </span>
             </CardTitle>
             {sortKey && (
@@ -2154,7 +2179,7 @@ export default function Assets() {
 
           <div className="mx-6 rounded-b-md border-x border-b">
             <PaginationControls
-              total={filteredAssets.length}
+              total={totalElements}
               page={page}
               pageSize={pageSize}
               totalPages={totalFilteredPages}
@@ -2373,7 +2398,7 @@ export default function Assets() {
               {/* Purchase Date */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
-                  Purchase Date
+                  Purchase Date (optional)
                 </div>
                 <Input
                   type="date"
@@ -2388,7 +2413,7 @@ export default function Assets() {
               {/* Warranty End */}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">
-                  Warranty End
+                  Warranty End (optional)
                 </div>
                 <Input
                   type="date"
@@ -2400,6 +2425,14 @@ export default function Assets() {
                 />
               </div>
             </div>
+
+            <Separator className="my-4" />
+            <AssetAttachments
+              assetId={editingId ?? undefined}
+              stagedFiles={stagedAttachments}
+              onStagedFilesChange={setStagedAttachments}
+              disabled={saving}
+            />
           </div>
 
           <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">

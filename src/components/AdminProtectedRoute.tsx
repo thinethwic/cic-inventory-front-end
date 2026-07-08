@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useUser } from "@/lib/auth";
-import { motion } from "framer-motion";
+import { Loader2 } from "lucide-react";
 import { Navigate } from "react-router-dom";
 
 type Props = {
@@ -20,18 +20,8 @@ function AdminRouteLoader() {
           </p>
         </div>
 
-        <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-          <motion.div
-            className="absolute left-0 top-0 h-full rounded-full bg-primary"
-            initial={{ x: "-100%" }}
-            animate={{ x: "100%" }}
-            transition={{
-              repeat: Infinity,
-              duration: 1.2,
-              ease: "easeInOut",
-            }}
-            style={{ width: "45%" }}
-          />
+        <div className="flex justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
         </div>
       </div>
     </div>

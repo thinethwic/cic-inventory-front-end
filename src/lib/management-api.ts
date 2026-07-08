@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useAuth } from "@/lib/auth";
 import { clearPersistedAuthSession } from "@/lib/auth";
+import { parseJsonOrThrow } from "@/lib/http";
 import type {
     Department,
     Location,
@@ -75,13 +76,7 @@ async function apiFetch<T>(
         clearPersistedAuthSession();
     }
 
-    if (!res.ok) {
-        const msg = await res.text().catch(() => `HTTP ${res.status}`);
-        throw new Error(msg || `Request failed: ${res.status}`);
-    }
-
-    if (res.status === 204) return undefined as T;
-    return res.json() as Promise<T>;
+    return parseJsonOrThrow<T>(res);
 }
 
 function unwrap<T>(res: T[] | SpringPage<T>): T[] {
