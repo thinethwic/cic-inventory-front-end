@@ -16,12 +16,15 @@ import {
   Building2,
   Search,
   Check,
+  Inbox,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { TabsContent } from "@/components/ui/tabs";
 import {
   Select,
@@ -74,7 +77,7 @@ const DEFAULT_PAGE_SIZE = 25;
 // ─── Shared ───────────────────────────────────────────────────────────────────
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs text-muted-foreground">{children}</div>;
+  return <Label className="text-xs text-muted-foreground">{children}</Label>;
 }
 
 function FilterSearchInput({
@@ -256,14 +259,15 @@ function ActionMenu({
 
 function LoadingRow({ colSpan }: { colSpan: number }) {
   return (
-    <TableRow>
-      <TableCell colSpan={colSpan} className="py-10 text-center">
-        <div className="flex items-center justify-center gap-2 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading…
-        </div>
-      </TableCell>
-    </TableRow>
+    <>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <TableRow key={`skeleton-${i}`}>
+          <TableCell colSpan={colSpan} className="py-3">
+            <Skeleton className="h-4 w-full max-w-sm" />
+          </TableCell>
+        </TableRow>
+      ))}
+    </>
   );
 }
 
@@ -272,9 +276,14 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
     <TableRow>
       <TableCell
         colSpan={colSpan}
-        className="py-10 text-center text-muted-foreground"
+        className="py-12 text-center text-muted-foreground"
       >
-        {text}
+        <div className="flex flex-col items-center gap-2">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+            <Inbox className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <p>{text}</p>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -334,8 +343,7 @@ const PaginationControls = React.memo(function PaginationControls({
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(1)}
             disabled={page === 1}
@@ -345,8 +353,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page - 1)}
             disabled={page === 1}
@@ -359,8 +366,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </span>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= safeTotalPages}
@@ -370,8 +376,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(safeTotalPages)}
             disabled={page >= safeTotalPages}

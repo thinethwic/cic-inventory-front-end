@@ -347,6 +347,7 @@ export function SignIn({
   const { signInWithPassword } = useAuthContext();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -365,13 +366,15 @@ export function SignIn({
   };
 
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
+    <form className="space-y-5" onSubmit={onSubmit}>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
           id="email"
           type="email"
           autoComplete="email"
+          placeholder="you@company.com"
+          className="h-10"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           disabled={submitting}
@@ -380,29 +383,47 @@ export function SignIn({
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          disabled={submitting}
-          required
-        />
+        <div className="relative">
+          <Input
+            id="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            placeholder="••••••••"
+            className="h-10 pr-10"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={submitting}
+            required
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            disabled={submitting}
+            tabIndex={-1}
+            className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+          >
+            {showPassword ? (
+              <EyeOff className="size-4" aria-hidden="true" />
+            ) : (
+              <Eye className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
       {error ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
         </div>
       ) : null}
-      <Button type="submit" className="w-full" disabled={submitting}>
+      <Button type="submit" className="h-10 w-full" disabled={submitting}>
         {submitting ? "Signing in..." : "Sign in"}
       </Button>
     </form>
   );
 }
 
-import { LogOut } from "lucide-react";
+import { Eye, EyeOff, LogOut } from "lucide-react";
 
 export function UserButton({
   afterSignOutUrl = "/login",

@@ -10,9 +10,11 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Inbox,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -286,21 +288,25 @@ export default function UserManagementTab({
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-10 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading users...
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell colSpan={6} className="py-3">
+                        <Skeleton className="h-4 w-full max-w-sm" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : paginated.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={6}
-                      className="py-10 text-center text-muted-foreground"
+                      className="py-12 text-center text-muted-foreground"
                     >
-                      No users found.
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                          <Inbox className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <p>No users found.</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -395,8 +401,7 @@ export default function UserManagementTab({
               <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage(0)}
                   disabled={safePage === 0}
@@ -406,8 +411,7 @@ export default function UserManagementTab({
                 </Button>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={safePage === 0}
@@ -420,8 +424,7 @@ export default function UserManagementTab({
                 </span>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() =>
                     setPage((p) => Math.min(totalPages - 1, p + 1))
@@ -433,8 +436,7 @@ export default function UserManagementTab({
                 </Button>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage(totalPages - 1)}
                   disabled={safePage + 1 >= totalPages}

@@ -164,6 +164,23 @@ export function useManagementApi() {
         return { employees, locations, suppliers };
     }, [getAuthToken]);
 
+    // Lightweight load for Asset Transfer page — employees + locations only.
+    // (Suppliers aren't shown anywhere on that page, so skip that query entirely.)
+    const loadTransferLookups = React.useCallback(async (): Promise<{
+        employees: Employee[];
+        locations: Location[];
+    }> => {
+        const token = await getAuthToken();
+        if (!token) throw new Error("Not authenticated");
+
+        const [employees, locations] = await Promise.all([
+            apiFetch<Employee[] | SpringPage<Employee>>(token, `/employees${ALL}`).then(unwrap),
+            apiFetch<Location[] | SpringPage<Location>>(token, `/locations${ALL}`).then(unwrap),
+        ]);
+
+        return { employees, locations };
+    }, [getAuthToken]);
+
     const createEmployee = React.useCallback(
         (payload: EmployeePayload) =>
             withToken((t) =>
@@ -278,6 +295,7 @@ export function useManagementApi() {
         loadAll,
         loadUserManagement,
         loadAssetLookups,
+        loadTransferLookups,
         createEmployee,
         updateEmployee,
         deleteEmployee,

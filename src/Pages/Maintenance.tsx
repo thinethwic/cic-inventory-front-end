@@ -30,6 +30,7 @@ import {
   ChevronsRight,
   MapPin,
   X,
+  Inbox,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
@@ -37,6 +38,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -132,7 +135,7 @@ function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
 function StatusBadge({ status }: { status: MaintenanceStatus }) {
   if (status === "Cannot Repair") {
     return (
-      <Badge className="bg-orange-500 text-white hover:bg-orange-600 border-transparent">
+      <Badge className="bg-warning text-warning-foreground hover:bg-warning/90 border-transparent">
         Cannot Repair
       </Badge>
     );
@@ -944,7 +947,7 @@ export default function MaintenancePage() {
           )}
         >
           <div className="space-y-1 sm:col-span-2 md:col-span-1">
-            <div className="text-xs text-muted-foreground">Search</div>
+            <Label className="text-xs text-muted-foreground">Search</Label>
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -953,7 +956,7 @@ export default function MaintenancePage() {
           </div>
 
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Status</div>
+            <Label className="text-xs text-muted-foreground">Status</Label>
             <Select
               value={statusFilter}
               onValueChange={(v) =>
@@ -975,7 +978,7 @@ export default function MaintenancePage() {
           </div>
 
           <div className="space-y-1">
-            <div className="text-xs text-muted-foreground">Priority</div>
+            <Label className="text-xs text-muted-foreground">Priority</Label>
             <Select
               value={priorityFilter}
               onValueChange={(v) =>
@@ -998,7 +1001,7 @@ export default function MaintenancePage() {
 
           {isAdmin && (
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Location</div>
+              <Label className="text-xs text-muted-foreground">Location</Label>
               <LocationCombobox
                 locations={locations}
                 value={locationFilter}
@@ -1036,20 +1039,49 @@ export default function MaintenancePage() {
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="py-10 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                  Array.from({ length: Math.min(pageSize, 10) }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      <TableCell className="pl-6">
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-24" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-32" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-16 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-5 w-20 rounded-full" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-20" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-16" />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton className="h-4 w-16" />
+                      </TableCell>
+                      <TableCell className="pr-6 text-right">
+                        <Skeleton className="ml-auto h-8 w-8 rounded-md" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={9}
-                      className="py-10 text-center text-muted-foreground"
+                      className="py-12 text-center text-muted-foreground"
                     >
-                      No maintenance tickets found.
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                          <Inbox className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <p>No maintenance tickets found.</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -1168,8 +1200,7 @@ export default function MaintenancePage() {
               <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage(0)}
                   disabled={page === 0 || isFetching}
@@ -1179,8 +1210,7 @@ export default function MaintenancePage() {
                 </Button>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                   disabled={page === 0 || isFetching}
@@ -1193,8 +1223,7 @@ export default function MaintenancePage() {
                 </span>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() =>
                     setPage((p) => Math.min(totalPages - 1, p + 1))
@@ -1206,8 +1235,7 @@ export default function MaintenancePage() {
                 </Button>
                 <Button
                   variant="outline"
-                  size="icon"
-                  className="h-8 w-8"
+                  size="icon-sm"
                   type="button"
                   onClick={() => setPage(totalPages - 1)}
                   disabled={page + 1 >= totalPages || isFetching}
@@ -1260,7 +1288,7 @@ export default function MaintenancePage() {
             )}
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Ticket No</div>
+              <Label className="text-xs text-muted-foreground">Ticket No</Label>
               <Input
                 value={editingId ? form.ticketNo : "Auto generated by system"}
                 disabled
@@ -1269,7 +1297,7 @@ export default function MaintenancePage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Asset *</div>
+              <Label className="text-xs text-muted-foreground">Asset *</Label>
               {editingId ? (
                 <Input value={form.assetCode} disabled readOnly />
               ) : (
@@ -1283,7 +1311,7 @@ export default function MaintenancePage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Issue Title *</div>
+              <Label className="text-xs text-muted-foreground">Issue Title *</Label>
               <Input
                 value={form.issueTitle}
                 onChange={(e) =>
@@ -1295,7 +1323,7 @@ export default function MaintenancePage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Description</div>
+              <Label className="text-xs text-muted-foreground">Description</Label>
               <Input
                 value={form.description ?? ""}
                 onChange={(e) =>
@@ -1308,7 +1336,7 @@ export default function MaintenancePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Priority</div>
+                <Label className="text-xs text-muted-foreground">Priority</Label>
                 <Select
                   value={form.priority}
                   onValueChange={(v) =>
@@ -1332,7 +1360,7 @@ export default function MaintenancePage() {
                 </Select>
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Status</div>
+                <Label className="text-xs text-muted-foreground">Status</Label>
                 <Select
                   value={form.status}
                   onValueChange={(v) =>
@@ -1356,9 +1384,9 @@ export default function MaintenancePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">
+                <Label className="text-xs text-muted-foreground">
                   Reported Date *
-                </div>
+                </Label>
                 <Input
                   type="date"
                   value={form.reportedDate}
@@ -1369,7 +1397,7 @@ export default function MaintenancePage() {
                 />
               </div>
               <div className="space-y-1">
-                <div className="text-xs text-muted-foreground">Location</div>
+                <Label className="text-xs text-muted-foreground">Location</Label>
                 <Input
                   value={form.location ?? ""}
                   onChange={(e) =>
@@ -1384,7 +1412,7 @@ export default function MaintenancePage() {
             {isAdmin && (
               <>
                 <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Due Date</div>
+                  <Label className="text-xs text-muted-foreground">Due Date</Label>
                   <Input
                     type="date"
                     value={form.dueDate ?? ""}
@@ -1397,9 +1425,9 @@ export default function MaintenancePage() {
 
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-muted-foreground">
+                    <Label className="text-xs text-muted-foreground">
                       Assigned To
-                    </div>
+                    </Label>
                     <TechnicianToggle
                       value={technicianType}
                       onChange={(t) => {
@@ -1432,7 +1460,7 @@ export default function MaintenancePage() {
                 </div>
 
                 <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Cost</div>
+                  <Label className="text-xs text-muted-foreground">Cost</Label>
                   <Input
                     type="number"
                     value={form.cost ?? ""}
@@ -1453,7 +1481,7 @@ export default function MaintenancePage() {
             )}
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Notes</div>
+              <Label className="text-xs text-muted-foreground">Notes</Label>
               <Input
                 value={form.notes ?? ""}
                 onChange={(e) =>

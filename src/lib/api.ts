@@ -323,6 +323,36 @@ export async function fetchDashboardStats(getToken: GetTokenFn): Promise<Dashboa
     };
 }
 
+// ─── Asset breakdown (server-aggregated counts for Reports charts/KPIs) ───────
+export interface AssetBreakdown {
+    statusCounts: Partial<Record<AssetStatus, number>>;
+    categoryCounts: Record<string, number>;
+}
+
+interface RawAssetBreakdown {
+    statusCounts: Record<string, number>;
+    categoryCounts: Record<string, number>;
+}
+
+export async function fetchAssetBreakdown(getToken: GetTokenFn): Promise<AssetBreakdown> {
+    const res = await authFetch(getToken, `${ASSETS_ENDPOINT}/breakdown`);
+    const data = await handleResponse<RawAssetBreakdown>(res);
+
+    const statusCounts: Partial<Record<AssetStatus, number>> = {};
+    for (const [rawStatus, count] of Object.entries(data.statusCounts ?? {})) {
+        const label = STATUS_TO_FRONTEND[rawStatus] ?? (rawStatus as AssetStatus);
+        statusCounts[label] = count;
+    }
+
+    const categoryCounts: Record<string, number> = {};
+    for (const [rawCategory, count] of Object.entries(data.categoryCounts ?? {})) {
+        const label = CATEGORY_TO_FRONTEND[rawCategory] ?? rawCategory;
+        categoryCounts[label] = count;
+    }
+
+    return { statusCounts, categoryCounts };
+}
+
 // ─── Standalone exports (backward compatible) ─────────────────────────────────
 /** @deprecated Use the useAssetApi hook instead. */
 export async function fetchAssets(getToken: GetTokenFn): Promise<Asset[]> {

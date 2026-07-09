@@ -29,11 +29,14 @@ import {
   TrendingUp,
   MapPin,
   Loader2,
+  Inbox,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -66,7 +69,8 @@ import {
 import { Check, ChevronsUpDown as ComboIcon } from "lucide-react";
 
 import type { Asset, Maintenance, Employee } from "@/types";
-import { useAssetApi } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { useAssetApi, fetchAssetBreakdown, type AssetBreakdown } from "@/lib/api";
 import { useMaintenanceApi } from "@/lib/maintainance-api";
 import { useManagementApi } from "@/lib/management-api";
 import {
@@ -163,7 +167,7 @@ const KpiCard = React.memo(function KpiCard({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Skeleton className="h-8 w-14" />
         ) : (
           <div className="text-2xl font-bold">{value}</div>
         )}
@@ -378,8 +382,7 @@ const PaginationControls = React.memo(function PaginationControls({
         <div className="flex items-center gap-1">
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(1)}
             disabled={page === 1}
@@ -389,8 +392,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page - 1)}
             disabled={page === 1}
@@ -403,8 +405,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </span>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(page + 1)}
             disabled={page >= safeTotalPages}
@@ -414,8 +415,7 @@ const PaginationControls = React.memo(function PaginationControls({
           </Button>
           <Button
             variant="outline"
-            size="icon"
-            className="h-8 w-8"
+            size="icon-sm"
             type="button"
             onClick={() => onPageChange(safeTotalPages)}
             disabled={page >= safeTotalPages}
@@ -431,6 +431,7 @@ const PaginationControls = React.memo(function PaginationControls({
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function ReportsPage() {
+  const { getToken } = useAuth();
   const { getAll: getAllAssets } = useAssetApi();
   const { getAll: getAllMaintenance } = useMaintenanceApi();
   const { loadAssetLookups } = useManagementApi();
@@ -440,6 +441,15 @@ export default function ReportsPage() {
   const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Fetched separately (small aggregate query) so the KPI cards and status/
+  // category charts render immediately instead of waiting on the full
+  // asset-row fetch below, which the filterable table and CSV/PDF export
+  // still need in full.
+  const [breakdown, setBreakdown] = React.useState<AssetBreakdown | null>(
+    null,
+  );
+  const [breakdownLoading, setBreakdownLoading] = React.useState(true);
 
   // ── Filter state ─────────────────────────────────────────────────────────────
   const [filterSupplier, setFilterSupplier] = React.useState("All");
@@ -505,6 +515,27 @@ export default function ReportsPage() {
   React.useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  const getTokenRef = React.useRef(getToken);
+  React.useEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
+
+  const fetchBreakdown = React.useCallback(async () => {
+    setBreakdownLoading(true);
+    try {
+      const data = await fetchAssetBreakdown(getTokenRef.current);
+      setBreakdown(data);
+    } catch (e) {
+      console.error("Failed to load asset breakdown:", e);
+    } finally {
+      setBreakdownLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchBreakdown();
+  }, [fetchBreakdown]);
 
   // ── Employee ID → department name map ─────────────────────────────────────────
   const employeeDeptMap = React.useMemo((): Map<string, string> => {
@@ -577,26 +608,50 @@ export default function ReportsPage() {
     [assets],
   );
 
-  // ── KPI numbers ───────────────────────────────────────────────────────────────
+  // ── KPI numbers (prefer the fast server-aggregated breakdown when ready) ──────
+  const totalAssets = React.useMemo(() => {
+    if (breakdown) {
+      return Object.values(breakdown.statusCounts).reduce(
+        (sum, n) => sum + (n ?? 0),
+        0,
+      );
+    }
+    return assets.length;
+  }, [breakdown, assets]);
+
   const kpiData = React.useMemo(() => {
-    const assigned = assets.filter((a) => a.status === "Assigned").length;
-    const inRepair = assets.filter((a) => a.status === "In Repair").length;
+    const assigned = breakdown
+      ? (breakdown.statusCounts["Assigned"] ?? 0)
+      : assets.filter((a) => a.status === "Assigned").length;
+    const inRepair = breakdown
+      ? (breakdown.statusCounts["In Repair"] ?? 0)
+      : assets.filter((a) => a.status === "In Repair").length;
     const openMaintenance = maintenance.filter(
       (m) => m.status === "Open" || m.status === "In Progress",
     ).length;
     const uniqueLocations = new Set(assets.map((a) => a.location)).size;
     return { assigned, inRepair, openMaintenance, uniqueLocations };
-  }, [assets, maintenance]);
+  }, [assets, maintenance, breakdown]);
 
   // ── Chart data ────────────────────────────────────────────────────────────────
-  const assetStatusData = React.useMemo(
-    () => buildCountData(assets.map((a) => a.status)),
-    [assets],
-  );
-  const assetCategoryData = React.useMemo(
-    () => buildCountData(assets.map((a) => a.category)),
-    [assets],
-  );
+  const assetStatusData = React.useMemo(() => {
+    if (breakdown) {
+      return Object.entries(breakdown.statusCounts).map(([name, value]) => ({
+        name,
+        value: value ?? 0,
+      }));
+    }
+    return buildCountData(assets.map((a) => a.status));
+  }, [breakdown, assets]);
+  const assetCategoryData = React.useMemo(() => {
+    if (breakdown) {
+      return Object.entries(breakdown.categoryCounts).map(([name, value]) => ({
+        name,
+        value,
+      }));
+    }
+    return buildCountData(assets.map((a) => a.category));
+  }, [breakdown, assets]);
   const maintenanceStatusData = React.useMemo(
     () => buildCountData(maintenance.map((m) => m.status)),
     [maintenance],
@@ -784,7 +839,10 @@ export default function ReportsPage() {
 
         <div className="flex flex-wrap gap-2">
           <Button
-            onClick={fetchAll}
+            onClick={() => {
+              void fetchAll();
+              void fetchBreakdown();
+            }}
             variant="outline"
             className="gap-2"
             type="button"
@@ -847,16 +905,16 @@ export default function ReportsPage() {
         <KpiCard
           icon={Package}
           label="Total Assets"
-          value={assets.length}
+          value={totalAssets}
           sub={`${kpiData.assigned} assigned`}
-          loading={loading}
+          loading={breakdownLoading}
         />
         <KpiCard
           icon={TrendingUp}
           label="In Repair"
           value={kpiData.inRepair}
           sub="currently being serviced"
-          loading={loading}
+          loading={breakdownLoading}
         />
         <KpiCard
           icon={Wrench}
@@ -885,7 +943,7 @@ export default function ReportsPage() {
         <ChartCard
           title="Asset Status Distribution"
           empty={assetStatusData.length === 0}
-          loading={loading}
+          loading={breakdownLoading}
           heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
@@ -910,7 +968,7 @@ export default function ReportsPage() {
         <ChartCard
           title="Assets by Category"
           empty={assetCategoryData.length === 0}
-          loading={loading}
+          loading={breakdownLoading}
           heightClass="h-[360px]"
         >
           <ResponsiveContainer width="100%" height="100%">
@@ -1036,7 +1094,7 @@ export default function ReportsPage() {
           {/* ── Filter controls ── */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 items-end">
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Supplier</div>
+              <Label className="text-xs text-muted-foreground">Supplier</Label>
               <SearchCombobox
                 value={filterSupplier}
                 onValueChange={setFilterSupplier}
@@ -1048,7 +1106,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Location</div>
+              <Label className="text-xs text-muted-foreground">Location</Label>
               <SearchCombobox
                 value={filterLocation}
                 onValueChange={setFilterLocation}
@@ -1060,7 +1118,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Assigned To</div>
+              <Label className="text-xs text-muted-foreground">Assigned To</Label>
               <SearchCombobox
                 value={filterAssignedTo}
                 onValueChange={setFilterAssignedTo}
@@ -1072,7 +1130,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Status</div>
+              <Label className="text-xs text-muted-foreground">Status</Label>
               <SearchCombobox
                 value={filterStatus}
                 onValueChange={setFilterStatus}
@@ -1084,7 +1142,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Department</div>
+              <Label className="text-xs text-muted-foreground">Department</Label>
               <SearchCombobox
                 value={filterDepartment}
                 onValueChange={setFilterDepartment}
@@ -1096,7 +1154,7 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">Category</div>
+              <Label className="text-xs text-muted-foreground">Category</Label>
               <SearchCombobox
                 value={filterCategory}
                 onValueChange={setFilterCategory}
@@ -1108,9 +1166,9 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">
+              <Label className="text-xs text-muted-foreground">
                 Purchase Date From
-              </div>
+              </Label>
               <Input
                 type="date"
                 value={filterDateFrom}
@@ -1119,9 +1177,9 @@ export default function ReportsPage() {
             </div>
 
             <div className="space-y-1">
-              <div className="text-xs text-muted-foreground">
+              <Label className="text-xs text-muted-foreground">
                 Purchase Date To
-              </div>
+              </Label>
               <Input
                 type="date"
                 value={filterDateTo}
@@ -1133,9 +1191,31 @@ export default function ReportsPage() {
           {/* Results table */}
           <div className="rounded-md border">
             {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Asset Code</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Model</TableHead>
+                    <TableHead>Serial No</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Location</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Purchase Date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <TableRow key={`skeleton-${i}`}>
+                      {Array.from({ length: 8 }).map((_, j) => (
+                        <TableCell key={j}>
+                          <Skeleton className="h-4 w-full" />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             ) : (
               <>
                 <Table>
@@ -1156,9 +1236,14 @@ export default function ReportsPage() {
                       <TableRow>
                         <TableCell
                           colSpan={9}
-                          className="py-8 text-center text-muted-foreground"
+                          className="py-12 text-center text-muted-foreground"
                         >
-                          No assets match the selected filters.
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                              <Inbox className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                            <p>No assets match the selected filters.</p>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ) : (

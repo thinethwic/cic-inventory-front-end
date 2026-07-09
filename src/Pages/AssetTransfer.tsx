@@ -2,6 +2,7 @@
 import * as React from "react";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   Repeat,
   Search,
@@ -19,6 +20,7 @@ import {
   ChevronLeft,
   Building2,
   Hash,
+  Inbox,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -51,11 +54,10 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import { useManagementApi } from "@/lib/management-api";
-import { fetchAssets, useAssetApi } from "@/lib/api";
+import { useAssetApi } from "@/lib/api";
 import {
   fetchAssetTransfers,
   createAssetTransfer,
-  type AssetTransferResponse,
   type AssetTransferDTO,
 } from "@/lib/asset-transfer-api";
 import type { Asset, AssetFormState, Employee, Location } from "@/types";
@@ -173,45 +175,51 @@ function buildAssetPayload(args: {
 }
 
 // ── Searchable Asset Combobox ─────────────────────────────────────────────────
+// Searches the server as the user types (small pages) instead of preloading
+// the entire asset table up front — the previous version fetched up to 1000
+// assets just to populate this one dropdown.
 interface AssetComboboxProps {
-  assets: Asset[];
-  value: string;
-  onChange: (id: string) => void;
+  selectedAsset: Asset | null;
+  onSelect: (asset: Asset) => void;
   disabled?: boolean;
 }
 
 function AssetCombobox({
-  assets,
-  value,
-  onChange,
+  selectedAsset,
+  onSelect,
   disabled,
 }: AssetComboboxProps) {
+  const { getPage } = useAssetApi();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  const [results, setResults] = React.useState<Asset[]>([]);
+  const [loading, setLoading] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  const filtered = React.useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return assets;
-    return assets.filter((a) =>
-      [
-        a.assetCode,
-        a.serialNo,
-        a.barcode,
-        a.brand,
-        a.model,
-        a.category,
-        extractName(a.location as unknown),
-        extractName(a.assignedTo as unknown),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [assets, search]);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const selected = assets.find((a) => a.id === value);
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    getPage({ search: debouncedSearch, size: 20 })
+      .then((page) => {
+        if (!cancelled) setResults(page.content);
+      })
+      .catch(() => {
+        if (!cancelled) setResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, debouncedSearch, getPage]);
 
   React.useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 50);
@@ -229,23 +237,23 @@ function AssetCombobox({
           type="button"
           className={cn(
             "w-full justify-between font-normal",
-            !selected && "text-muted-foreground",
+            !selectedAsset && "text-muted-foreground",
           )}
         >
-          {selected ? (
+          {selectedAsset ? (
             <span className="flex items-center gap-2 truncate">
               <span className="font-medium text-foreground">
-                {selected.assetCode}
+                {selectedAsset.assetCode}
               </span>
               <span className="text-muted-foreground">·</span>
               <span className="truncate text-muted-foreground">
-                {selected.brand} {selected.model}
+                {selectedAsset.brand} {selectedAsset.model}
               </span>
-              {selected.serialNo && (
+              {selectedAsset.serialNo && (
                 <>
                   <span className="text-muted-foreground">·</span>
                   <span className="font-mono text-xs text-muted-foreground">
-                    {selected.serialNo}
+                    {selectedAsset.serialNo}
                   </span>
                 </>
               )}
@@ -270,15 +278,18 @@ function AssetCombobox({
             placeholder="Search by code, serial, brand, model..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
+          {loading && (
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+          )}
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
-          {filtered.length === 0 ? (
+          {!loading && results.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
               No assets found.
             </div>
           ) : (
-            filtered.map((a) => {
-              const isSelected = a.id === value;
+            results.map((a) => {
+              const isSelected = a.id === selectedAsset?.id;
               const locationName = extractName(a.location as unknown);
               const assignedToName = extractName(a.assignedTo as unknown);
               return (
@@ -286,7 +297,7 @@ function AssetCombobox({
                   key={a.id}
                   type="button"
                   onClick={() => {
-                    onChange(a.id);
+                    onSelect(a);
                     setOpen(false);
                   }}
                   className={cn(
@@ -665,31 +676,21 @@ export default function AssetTransferPage() {
   const { getToken } = useAuth();
   const managementApi = useManagementApi();
   const { update: updateAssetRecord } = useAssetApi();
+  const queryClient = useQueryClient();
 
   const getTokenRef = React.useRef(getToken);
   getTokenRef.current = getToken;
-  const loadAssetLookupsRef = React.useRef(managementApi.loadAssetLookups);
-  loadAssetLookupsRef.current = managementApi.loadAssetLookups;
 
   // ── State ──────────────────────────────────────────────────────────────────
-  const [assets, setAssets] = React.useState<Asset[]>([]);
-  const [employees, setEmployees] = React.useState<Employee[]>([]);
-  const [locations, setLocations] = React.useState<Location[]>([]);
-  const [history, setHistory] = React.useState<AssetTransferResponse[]>([]);
-
-  const [loading, setLoading] = React.useState(true);
-  const [historyLoading, setHistoryLoading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
 
   const [historyPage, setHistoryPage] = React.useState(0);
-  const [historyTotalPages, setHistoryTotalPages] = React.useState(1);
-  const [historyTotalElements, setHistoryTotalElements] = React.useState(0);
   const [historyPageSize, setHistoryPageSize] = React.useState(25);
   const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
-  const [selectedAssetId, setSelectedAssetId] = React.useState("");
+  const [selectedAsset, setSelectedAsset] = React.useState<Asset | null>(null);
   const [transferType, setTransferType] = React.useState<TransferType>("both");
   const [newEmployeeId, setNewEmployeeId] = React.useState("");
   const [newLocationId, setNewLocationId] = React.useState("");
@@ -698,58 +699,43 @@ export default function AssetTransferPage() {
   );
   const [reason, setReason] = React.useState("");
 
-  // ── Data loaders ───────────────────────────────────────────────────────────
-  const loadPageData = React.useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [assetRows, lookups] = await Promise.all([
-        fetchAssets(getTokenRef.current),
-        loadAssetLookupsRef.current(),
-      ]);
-      setAssets(Array.isArray(assetRows) ? assetRows : []);
-      setEmployees(Array.isArray(lookups?.employees) ? lookups.employees : []);
-      setLocations(Array.isArray(lookups?.locations) ? lookups.locations : []);
-    } catch (err) {
-      setError(getReadableErrorMessage(err, "Failed to load data."));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // ── Lookups (employees/locations) ───────────────────────────────────────────
+  // Cached for 5 minutes via React Query so repeat visits to this page (and
+  // "Refresh Data" clicks elsewhere) don't always re-fetch the full tables —
+  // the asset picker itself already avoids this by searching the server as
+  // the user types instead of requiring every asset to be fetched up front.
+  const {
+    data: lookups,
+    isLoading: lookupsLoading,
+    isError: lookupsErrored,
+    error: lookupsError,
+    refetch: refetchLookups,
+  } = useQuery({
+    queryKey: ["transfer-lookups"],
+    queryFn: () => managementApi.loadTransferLookups(),
+    staleTime: 1000 * 60 * 5,
+  });
+  const employees = React.useMemo(() => lookups?.employees ?? [], [lookups]);
+  const locations = React.useMemo(() => lookups?.locations ?? [], [lookups]);
 
-  const loadHistory = React.useCallback(
-    async (page = 0, size?: number) => {
-      setHistoryLoading(true);
-      const pageSize = size ?? historyPageSize;
-      try {
-        const result = await fetchAssetTransfers(
-          getTokenRef.current,
-          page,
-          pageSize,
-        );
-        setHistory(Array.isArray(result?.content) ? result.content : []);
-        setHistoryPage(page);
-        setHistoryTotalPages(result?.totalPages ?? 1);
-        setHistoryTotalElements(result?.totalElements ?? 0);
-      } catch (err) {
-        console.warn("Failed to load transfer history:", err);
-      } finally {
-        setHistoryLoading(false);
-      }
-    },
-    [historyPageSize],
-  );
-
-  React.useEffect(() => {
-    void loadPageData();
-    void loadHistory(0);
-  }, [loadPageData, loadHistory]);
-
-  // ── Derived state ──────────────────────────────────────────────────────────
-  const selectedAsset = React.useMemo(
-    () => assets.find((a) => a.id === selectedAssetId) ?? null,
-    [assets, selectedAssetId],
-  );
+  // ── Transfer history (paginated) ────────────────────────────────────────────
+  // keepPreviousData avoids a full skeleton flash when turning pages — the
+  // previous page's rows stay on screen (dimmed via isFetching) until the
+  // next page resolves.
+  const {
+    data: historyPageData,
+    isLoading: historyLoading,
+    isFetching: historyFetching,
+    refetch: refetchHistory,
+  } = useQuery({
+    queryKey: ["asset-transfer-history", historyPage, historyPageSize],
+    queryFn: () =>
+      fetchAssetTransfers(getTokenRef.current, historyPage, historyPageSize),
+    placeholderData: keepPreviousData,
+  });
+  const history = historyPageData?.content ?? [];
+  const historyTotalPages = historyPageData?.totalPages ?? 1;
+  const historyTotalElements = historyPageData?.totalElements ?? 0;
 
   // ── Resolve the asset's current location id (handles flat id or nested obj)
   const assetLocationId = React.useMemo((): string | null => {
@@ -811,7 +797,7 @@ export default function AssetTransferPage() {
     setError("");
     setNewEmployeeId("");
     setNewLocationId("");
-  }, [selectedAssetId]);
+  }, [selectedAsset?.id]);
 
   // ── Transfer handler ───────────────────────────────────────────────────────
   async function handleTransfer() {
@@ -980,13 +966,10 @@ export default function AssetTransferPage() {
             : null,
       };
 
-      const savedTransfer = await createAssetTransfer(getTokenRef.current, dto);
+      await createAssetTransfer(getTokenRef.current, dto);
 
-      setAssets((prev) =>
-        prev.map((item) => (item.id === updatedAsset.id ? updatedAsset : item)),
-      );
-      setSelectedAssetId(updatedAsset.id);
-      setHistory((prev) => [savedTransfer, ...prev]);
+      setSelectedAsset(updatedAsset);
+      void queryClient.invalidateQueries({ queryKey: ["asset-transfer-history"] });
 
       setTransferType("both");
       setNewEmployeeId("");
@@ -1031,10 +1014,13 @@ export default function AssetTransferPage() {
       </div>
 
       {/* Alerts */}
-      {error && (
+      {(error || lookupsErrored) && (
         <Alert variant="destructive">
           <AlertTitle>Something went wrong</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error ||
+              getReadableErrorMessage(lookupsError, "Failed to load data.")}
+          </AlertDescription>
         </Alert>
       )}
       {success && (
@@ -1045,7 +1031,7 @@ export default function AssetTransferPage() {
         </Alert>
       )}
 
-      {loading ? (
+      {lookupsLoading ? (
         <Card>
           <CardContent className="flex min-h-[320px] items-center justify-center">
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -1066,9 +1052,8 @@ export default function AssetTransferPage() {
                 <div className="space-y-2">
                   <Label>Select Asset *</Label>
                   <AssetCombobox
-                    assets={assets}
-                    value={selectedAssetId}
-                    onChange={setSelectedAssetId}
+                    selectedAsset={selectedAsset}
+                    onSelect={setSelectedAsset}
                     disabled={submitting}
                   />
                 </div>
@@ -1156,10 +1141,10 @@ export default function AssetTransferPage() {
                     type="button"
                     variant="outline"
                     onClick={() => {
-                      void loadPageData();
-                      void loadHistory(0);
+                      void refetchLookups();
+                      void refetchHistory();
                     }}
-                    disabled={loading || submitting}
+                    disabled={lookupsLoading || submitting}
                   >
                     Refresh Data
                   </Button>
@@ -1296,11 +1281,11 @@ export default function AssetTransferPage() {
                   variant="outline"
                   size="sm"
                   type="button"
-                  onClick={() => void loadHistory(0)}
-                  disabled={historyLoading}
+                  onClick={() => void refetchHistory()}
+                  disabled={historyFetching}
                   className="gap-2"
                 >
-                  {historyLoading ? (
+                  {historyFetching ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Repeat className="h-3.5 w-3.5" />
@@ -1328,15 +1313,17 @@ export default function AssetTransferPage() {
                   </TableHeader>
                   <TableBody>
                     {historyLoading ? (
-                      Array.from({ length: historyPageSize }).map((_, i) => (
-                        <TableRow key={i} className="animate-pulse">
-                          {Array.from({ length: 10 }).map((_, j) => (
-                            <TableCell key={j}>
-                              <div className="h-4 rounded bg-muted" />
-                            </TableCell>
-                          ))}
-                        </TableRow>
-                      ))
+                      Array.from({ length: Math.min(historyPageSize, 10) }).map(
+                        (_, i) => (
+                          <TableRow key={i}>
+                            {Array.from({ length: 10 }).map((_, j) => (
+                              <TableCell key={j}>
+                                <Skeleton className="h-4 w-full" />
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ),
+                      )
                     ) : history.length > 0 ? (
                       history.map((item) => (
                         <TableRow key={item.id} className="hover:bg-muted/30">
@@ -1410,7 +1397,12 @@ export default function AssetTransferPage() {
                           colSpan={10}
                           className="h-32 text-center text-muted-foreground"
                         >
-                          No transfer history yet.
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                              <Inbox className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                            <p>No transfer history yet.</p>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}
@@ -1439,7 +1431,7 @@ export default function AssetTransferPage() {
                       onValueChange={(v) => {
                         const newSize = Number(v);
                         setHistoryPageSize(newSize);
-                        void loadHistory(0, newSize);
+                        setHistoryPage(0);
                       }}
                     >
                       <SelectTrigger className="h-8 w-[70px]">
@@ -1458,22 +1450,20 @@ export default function AssetTransferPage() {
                   <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
+                      size="icon-sm"
                       type="button"
-                      onClick={() => void loadHistory(0)}
-                      disabled={historyPage === 0 || historyLoading}
+                      onClick={() => setHistoryPage(0)}
+                      disabled={historyPage === 0 || historyFetching}
                       title="First page"
                     >
                       <ChevronsLeft className="h-4 w-4" />
                     </Button>
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
+                      size="icon-sm"
                       type="button"
-                      onClick={() => void loadHistory(historyPage - 1)}
-                      disabled={historyPage === 0 || historyLoading}
+                      onClick={() => setHistoryPage((p) => p - 1)}
+                      disabled={historyPage === 0 || historyFetching}
                       title="Previous page"
                     >
                       <ChevronLeft className="h-4 w-4" />
@@ -1483,12 +1473,11 @@ export default function AssetTransferPage() {
                     </span>
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
+                      size="icon-sm"
                       type="button"
-                      onClick={() => void loadHistory(historyPage + 1)}
+                      onClick={() => setHistoryPage((p) => p + 1)}
                       disabled={
-                        historyPage + 1 >= historyTotalPages || historyLoading
+                        historyPage + 1 >= historyTotalPages || historyFetching
                       }
                       title="Next page"
                     >
@@ -1496,12 +1485,11 @@ export default function AssetTransferPage() {
                     </Button>
                     <Button
                       variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
+                      size="icon-sm"
                       type="button"
-                      onClick={() => void loadHistory(historyTotalPages - 1)}
+                      onClick={() => setHistoryPage(historyTotalPages - 1)}
                       disabled={
-                        historyPage + 1 >= historyTotalPages || historyLoading
+                        historyPage + 1 >= historyTotalPages || historyFetching
                       }
                       title="Last page"
                     >
