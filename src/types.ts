@@ -69,11 +69,11 @@ export type AssetFormState = {
 export const emptyAssetForm: AssetFormState = {
     assetCode: "",
     barcode: "",
-    category: "Laptop",
+    category: "",
     brand: "",
     model: "",
     serialNo: "",
-    status: "Available",
+    status: "Assigned",
     locationId: "",
     assignedToId: "",
     purchaseDate: "",

@@ -9,8 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Asset } from "@/types";
-import type { Maintenance } from "@/types";
+import type { Asset, Maintenance } from "@/types";
 
 import logo from "@/assets/Logo.png";
 
@@ -28,7 +27,19 @@ const fmtTime = (d = new Date()) =>
 
 const fmtStamp = (d = new Date()) => `${fmtDate(d)} · ${fmtTime(d)}`;
 
-// ─── Print style injection — A4 landscape ─────────────────────────────────────
+// A4 portrait at 96 dpi (used to scale the on-screen preview)
+const SHEET_W_PX = 793.7; // 210mm
+const SHEET_H_PX = 1122.5; // 297mm
+
+const COPY_LABELS = ["Security Copy", "Original"] as const;
+
+const BASE_FONT = "'Segoe UI', Arial, sans-serif";
+const MONO_FONT = "'Courier New', Courier, monospace";
+
+// The gate pass is black & white only
+const INK = "#000";
+
+// ─── Print style injection — A4 portrait ──────────────────────────────────────
 
 function usePrintStyle(printId: string) {
   React.useEffect(() => {
@@ -39,34 +50,32 @@ function usePrintStyle(printId: string) {
     el.id = styleId;
     el.textContent = `
       @media print {
-        @page { size: A4 landscape; margin: 0; }
+        @page { size: A4 portrait; margin: 0; }
         html, body {
-          width: 297mm; height: 210mm;
+          width: 210mm; height: 297mm;
           margin: 0 !important; padding: 0 !important;
           overflow: hidden !important;
         }
         body > * { display: none !important; }
         #${printId}-portal {
-          display: flex !important;
-          align-items: center;
-          justify-content: center;
+          display: block !important;
           position: fixed;
-          inset: 0;
+          top: 0;
+          left: 0;
+          width: 210mm;
+          height: 297mm;
           z-index: 99999;
           background: #fff;
-          width: 297mm;
-          height: 210mm;
-          padding: 10mm;
-          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
         }
-        #${printId}-portal > * { width: 100% !important; max-width: 100% !important; }
-        #${printId}-portal .gp-card {
-          width: 100% !important;
-          max-width: none !important;
-          box-sizing: border-box !important;
+        #${printId}-portal * {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
-        #${printId}-portal .gp-fields {
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        #${printId}-portal .gp-sheet {
+          box-shadow: none !important;
+          margin: 0 !important;
         }
       }
     `;
@@ -78,22 +87,22 @@ function usePrintStyle(printId: string) {
 // ─── Print trigger ────────────────────────────────────────────────────────────
 
 function doPrint(printId: string) {
-  const card = document.getElementById(printId);
-  if (!card) return;
+  const sheet = document.getElementById(printId);
+  if (!sheet) return;
 
   const portalId = `${printId}-portal`;
   let portal = document.getElementById(portalId);
   if (!portal) {
     portal = document.createElement("div");
     portal.id = portalId;
+    portal.style.display = "none";
     document.body.appendChild(portal);
   }
 
-  const clone = card.cloneNode(true) as HTMLElement;
-  clone.style.maxWidth = "100%";
-  clone.style.width = "100%";
+  // The sheet itself is never scaled (only its preview wrapper is),
+  // so the clone prints at true A4 size.
+  const clone = sheet.cloneNode(true) as HTMLElement;
   clone.style.boxShadow = "none";
-  clone.style.borderRadius = "0";
 
   portal.innerHTML = "";
   portal.appendChild(clone);
@@ -110,20 +119,25 @@ interface FieldDef {
   value?: string | null;
   mono?: boolean;
   span?: 1 | 2 | 3;
+  /** Limit the value to N lines (for long text such as descriptions) */
+  clamp?: number;
 }
 
-interface GatePassCardProps {
+interface GatePassBaseProps {
   title: string;
   location?: string;
   createdBy?: string;
   updatedBy?: string;
   refNo: string;
-  accentHex: string;
   footerNote: string;
   fields: FieldDef[];
-  printId: string;
   completedAt?: string | null;
   isCompleted?: boolean;
+}
+
+interface GatePassCardProps extends GatePassBaseProps {
+  stamp: string;
+  copyLabel: string;
 }
 
 // ─── Signature Block ──────────────────────────────────────────────────────────
@@ -132,14 +146,12 @@ function SignatureBlock({
   label,
   createdBy,
   updatedBy,
-  accentHex,
   isFirst,
   isCompleted,
 }: {
   label: string;
   createdBy?: string;
   updatedBy?: string;
-  accentHex: string;
   isFirst: boolean;
   isCompleted?: boolean;
 }) {
@@ -153,37 +165,49 @@ function SignatureBlock({
 
   return (
     <div
-      className="rounded-b-sm px-3 pb-3 pt-2 sm:px-2 sm:pb-2 sm:pt-1"
-      style={{
-        borderTop: `2px solid ${accentHex}`,
-        background: `${accentHex}0a`,
-      }}
+      className="px-1.5 pb-1.5 pt-1"
+      style={{ borderTop: `2px solid ${INK}` }}
     >
-      <p
-        className="m-0 text-[9px] font-bold uppercase tracking-[0.15em] sm:text-[7.5px]"
-        style={{ color: accentHex }}
-      >
+      <p className="m-0 text-[10px] font-bold uppercase tracking-[0.1em] text-black">
         {label}
       </p>
 
       {isFirst && nameToShow && (
-        <p className="mb-0 mt-1 text-xs font-bold text-[#1a1a1a] sm:text-[9px]">
+        <p className="mb-0 mt-0.5 text-[12px] font-bold text-black">
           {nameToShow}
         </p>
       )}
 
       <div
-        className="border-b border-[#ccc] pb-0.5"
-        style={{ marginTop: isFirst && nameToShow ? 6 : 18 }}
+        style={{
+          marginTop: isFirst && nameToShow ? 6 : 20,
+          borderBottom: `1px solid ${INK}`,
+        }}
       />
-      <p className="mt-0.5 text-[9px] text-[#777] sm:text-[7.5px] sm:text-[#bbb]">
+      <p className="mb-0 mt-0.5 text-[9px] text-[#444]">
         {isFirst && nameToShow ? "Signature / Date" : "Name / Signature / Date"}
       </p>
     </div>
   );
 }
 
-// ─── Gate Pass Card ───────────────────────────────────────────────────────────
+// ─── Blank write-in field (Date Sent / Time / Vehicle No) ────────────────────
+
+function WriteInField({ label }: { label: string }) {
+  return (
+    <div className="flex items-end gap-2">
+      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-black">
+        {label}
+      </span>
+      <span
+        className="h-[18px] flex-1"
+        style={{ borderBottom: `1px solid ${INK}` }}
+      />
+    </div>
+  );
+}
+
+// ─── Gate Pass Card (one copy) ────────────────────────────────────────────────
 
 function GatePassCard({
   title,
@@ -191,28 +215,28 @@ function GatePassCard({
   createdBy,
   updatedBy,
   refNo,
-  accentHex,
   footerNote,
   fields,
-  printId,
   completedAt,
   isCompleted,
+  stamp,
+  copyLabel,
 }: GatePassCardProps) {
-  usePrintStyle(printId);
-
-  const stamp = fmtStamp();
   const firstSignatureLabel = isCompleted ? "Issued By" : "Prepared By";
-  const signatureLabels = [firstSignatureLabel, "Authorised By", "Received By"];
+  const signatureLabels = [
+    firstSignatureLabel,
+    "Authorised By",
+    "Security",
+    "Received By",
+  ];
 
   return (
     <div
-      id={printId}
-      className="gp-card relative mx-auto box-border w-full max-w-full overflow-hidden rounded-[4px] text-[#1a1a1a]"
+      className="relative box-border flex h-full w-full flex-col overflow-hidden text-black"
       style={{
-        fontFamily: "'Segoe UI', Arial, sans-serif",
+        fontFamily: BASE_FONT,
         background: "#fff",
-        border: `2px solid ${accentHex}`,
-        boxShadow: "0 2px 16px rgba(0,0,0,0.10)",
+        border: `2px solid ${INK}`,
       }}
     >
       {/* Diagonal watermark */}
@@ -221,127 +245,116 @@ function GatePassCard({
         className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center"
       >
         <span
-          className="select-none whitespace-nowrap text-5xl font-black uppercase tracking-[0.12em] sm:text-[72px] lg:text-[90px]"
+          className="select-none whitespace-nowrap text-[64px] font-black uppercase tracking-[0.12em]"
           style={{
-            color: "rgba(0,0,0,0.03)",
+            color: "rgba(0,0,0,0.04)",
             transform: "rotate(-22deg)",
-            fontFamily: "'Courier New', Courier, monospace",
+            fontFamily: MONO_FONT,
           }}
         >
           GATE PASS
         </span>
       </div>
 
-      {/* Top accent bar */}
-      <div className="h-[7px] w-full" style={{ background: accentHex }} />
-
       {/* Header */}
       <div
-        className="relative z-10 flex min-h-[40px] flex-col gap-4 border-b px-4 py-4 sm:px-5 lg:flex-row lg:items-center lg:justify-between lg:gap-6 lg:py-2.5"
-        style={{
-          borderColor: `${accentHex}22`,
-          background: `${accentHex}08`,
-        }}
+        className="relative z-10 flex shrink-0 items-center justify-between gap-4 px-4 py-2.5"
+        style={{ borderBottom: `2px solid ${INK}` }}
       >
         {/* Left: Logo + Title + Location */}
-        <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-3.5 lg:flex-1">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <img
             src={logo}
             alt="CIC Logo"
-            className="h-16 w-auto max-w-[140px] shrink-0 object-contain sm:h-20 sm:max-w-[180px] lg:h-28 lg:max-w-[240px]"
+            className="h-[110px] w-auto max-w-[205px] shrink-0 object-contain"
+            style={{ filter: "grayscale(1)" }}
           />
 
-          <div
-            className="hidden h-14 w-px shrink-0 rounded-sm sm:block"
-            style={{ background: `${accentHex}30` }}
-          />
+          <div className="h-14 w-px shrink-0" style={{ background: INK }} />
 
-          <div className="flex min-w-0 flex-col gap-1 text-left sm:gap-1.5 lg:flex-row lg:items-baseline lg:gap-3.5">
-            <h2
-              className="m-0 break-words text-xl font-extrabold leading-tight tracking-[0.04em] sm:text-2xl lg:text-xl"
-              style={{ color: accentHex }}
-            >
+          <div className="min-w-0">
+            <h2 className="m-0 break-words text-[26px] font-extrabold leading-tight tracking-[0.03em] text-black">
               {title}
             </h2>
             {location && (
-              <p className="mb-0 mt-[3px] break-words text-[11px] font-semibold tracking-[0.08em] text-[#555]">
+              <p className="mb-0 mt-1 break-words text-[13px] font-semibold tracking-[0.05em] text-[#333]">
                 Location: {location}
               </p>
             )}
           </div>
         </div>
 
-        {/* Right: Ref badge + Completed stamp */}
-        <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:max-w-[45%] sm:items-end sm:gap-1.5">
+        {/* Right: Copy label + Ref badge + Completed stamp */}
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            {completedAt && (
+              <div
+                className="flex items-center gap-1 px-2 py-0.5"
+                style={{ border: `1px solid ${INK}` }}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-black" />
+                <span
+                  className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-black"
+                  style={{ fontFamily: MONO_FONT }}
+                >
+                  Completed
+                </span>
+              </div>
+            )}
+            <span
+              className="px-2.5 py-0.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-black"
+              style={{ border: `2px solid ${INK}` }}
+            >
+              {copyLabel}
+            </span>
+          </div>
+
           <div
-            className="w-full max-w-full rounded px-3.5 py-2 text-left sm:py-1.5"
-            style={{ background: accentHex }}
+            className="max-w-[270px] px-3 py-1.5 text-right"
+            style={{ border: `2px solid ${INK}` }}
           >
             <p
-              className="m-0 break-all text-xl font-black tracking-[0.08em] text-white sm:text-2xl"
-              style={{
-                fontFamily: "'Courier New', Courier, monospace",
-                overflowWrap: "anywhere",
-              }}
+              className="m-0 break-all text-[19px] font-black leading-tight tracking-[0.06em] text-black"
+              style={{ fontFamily: MONO_FONT, overflowWrap: "anywhere" }}
             >
               {refNo}
             </p>
             <p
-              className="m-0 mt-[3px] text-left text-xs text-white/70 sm:text-[20px]"
-              style={{
-                fontFamily: "'Courier New', Courier, monospace",
-                overflowWrap: "anywhere",
-              }}
+              className="m-0 mt-0.5 text-[16px] text-[#333]"
+              style={{ fontFamily: MONO_FONT }}
             >
               {stamp}
             </p>
           </div>
-
-          {completedAt && (
-            <div className="flex items-center gap-1.5 rounded border border-green-600 bg-green-50 px-2.5 py-1">
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />
-              <div>
-                <p
-                  className="m-0 text-[8px] font-extrabold uppercase tracking-[0.15em] text-green-700"
-                  style={{
-                    fontFamily: "'Courier New', Courier, monospace",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  Completed
-                </p>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
       {/* Fields grid */}
-      <div className="gp-fields relative z-10 grid grid-cols-1 gap-x-3 px-4 pb-2 pt-2 sm:grid-cols-2 sm:px-5 lg:grid-cols-3">
+      <div className="relative z-10 grid min-h-0 flex-1 grid-cols-3 content-start gap-x-4 overflow-hidden px-4 pt-1">
         {fields.map((f) => (
           <div
             key={f.label}
-            className={`border-b border-dashed border-[#e0e0e0] py-2 sm:py-[5px] ${
-              f.span === 3
-                ? "sm:col-span-2 lg:col-span-3"
-                : f.span === 2
-                  ? "sm:col-span-2"
-                  : ""
+            className={`py-1 ${
+              f.span === 3 ? "col-span-3" : f.span === 2 ? "col-span-2" : ""
             }`}
+            style={{ borderBottom: "1px dashed #777" }}
           >
-            <p className="m-0 text-[8.5px] font-bold uppercase tracking-[0.18em] text-[#777] sm:text-[7.5px] sm:text-[#aaa]">
+            <p className="m-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#444]">
               {f.label}
             </p>
             <p
-              className="m-0 mt-0.5 break-words text-sm font-bold text-[#1a1a1a] sm:text-[11.5px]"
+              className="m-0 mt-0.5 break-words text-[15px] font-bold leading-snug text-black"
               style={{
-                fontFamily: f.mono
-                  ? "'Courier New', Courier, monospace"
-                  : "inherit",
-                whiteSpace: "normal",
-                overflow: "hidden",
-                textOverflow: "clip",
+                fontFamily: f.mono ? MONO_FONT : "inherit",
                 overflowWrap: "anywhere",
+                ...(f.clamp
+                  ? {
+                      display: "-webkit-box",
+                      WebkitLineClamp: f.clamp,
+                      WebkitBoxOrient: "vertical" as const,
+                      overflow: "hidden",
+                    }
+                  : {}),
               }}
             >
               {f.value || "—"}
@@ -350,13 +363,12 @@ function GatePassCard({
         ))}
       </div>
 
-      {/* Signature strip */}
-      <div className="relative z-10 mx-4 mb-2 mt-3 grid grid-cols-1 gap-3 sm:mx-5 sm:mb-1.5 sm:mt-2.5 sm:grid-cols-3">
+      {/* Signature strip: Prepared/Issued, Authorised, Received, Security */}
+      <div className="relative z-10 mx-4 mt-2 grid shrink-0 grid-cols-4 gap-2">
         {signatureLabels.map((label, i) => (
           <SignatureBlock
             key={label}
             label={label}
-            accentHex={accentHex}
             createdBy={createdBy}
             updatedBy={updatedBy}
             isCompleted={isCompleted}
@@ -365,20 +377,127 @@ function GatePassCard({
         ))}
       </div>
 
+      {/* Dispatch details to be filled in by hand */}
+      <div className="relative z-10 mx-4 mb-2 mt-2 grid shrink-0 grid-cols-3 gap-4">
+        <WriteInField label="Date Sent" />
+        <WriteInField label="Time" />
+        <WriteInField label="Vehicle No" />
+      </div>
+
       {/* Footer bar */}
       <div
-        className="mt-1 flex flex-col gap-1 px-4 py-2 text-center sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-1.5 sm:text-left"
-        style={{ background: accentHex }}
+        className="flex shrink-0 items-center justify-between px-4 py-1.5"
+        style={{ borderTop: `2px solid ${INK}` }}
       >
-        <p className="m-0 text-[10px] font-semibold text-white/90 sm:text-[8.5px]">
-          {footerNote}
-        </p>
+        <p className="m-0 text-[11px] font-semibold text-black">{footerNote}</p>
         <p
-          className="m-0 text-[9px] tracking-[0.1em] text-white/60 sm:text-[8px] sm:text-white/50"
-          style={{ fontFamily: "'Courier New', Courier, monospace" }}
+          className="m-0 text-[10px] tracking-[0.1em] text-black"
+          style={{ fontFamily: MONO_FONT }}
         >
           CONFIDENTIAL
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── A4 Portrait Sheet (Security copy on top, Customer copy below) ───────────
+
+function GatePassSheet({
+  printId,
+  ...cardProps
+}: GatePassBaseProps & { printId: string }) {
+  usePrintStyle(printId);
+  const stamp = React.useMemo(() => fmtStamp(), []);
+
+  return (
+    <div
+      id={printId}
+      className="gp-sheet relative bg-white"
+      style={{
+        width: "210mm",
+        height: "297mm",
+        boxSizing: "border-box",
+        fontFamily: BASE_FONT,
+      }}
+    >
+      {COPY_LABELS.map((label) => (
+        <div
+          key={label}
+          style={{
+            height: "148.5mm",
+            padding: "7mm 8mm",
+            boxSizing: "border-box",
+          }}
+        >
+          <GatePassCard {...cardProps} stamp={stamp} copyLabel={label} />
+        </div>
+      ))}
+
+      {/* Cut line between the two copies */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: "148.5mm",
+          borderTop: "1px dashed #555",
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: -7,
+            transform: "translateX(-50%)",
+            background: "#fff",
+            padding: "0 8px",
+            fontSize: 9,
+            letterSpacing: "0.12em",
+            color: "#000",
+          }}
+        >
+          ✂ CUT HERE
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Preview: shows the whole A4 sheet, scaled to fit the dialog ─────────────
+
+function SheetPreview({ children }: { children: React.ReactNode }) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [scale, setScale] = React.useState(1);
+
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () =>
+      setScale(Math.min(1, el.clientWidth / SHEET_W_PX) || 1);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref} className="w-full">
+      <div
+        className="mx-auto overflow-hidden bg-white shadow-lg ring-1 ring-black/10"
+        style={{ width: SHEET_W_PX * scale, height: SHEET_H_PX * scale }}
+      >
+        <div
+          style={{
+            width: "210mm",
+            height: "297mm",
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+          }}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -395,7 +514,9 @@ function GatePassFooter({
 }) {
   return (
     <div className="flex flex-col gap-3 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <p className="text-xs text-muted-foreground">Prints to A4 landscape</p>
+      <p className="text-xs text-muted-foreground">
+        Prints on A4 portrait · Security copy + Customer copy
+      </p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row">
         <Button variant="outline" onClick={onClose} type="button">
           Close
@@ -448,7 +569,7 @@ export function AssetGatePass({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-6xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
+      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
         <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-4 sm:px-6">
           <DialogTitle className="min-w-0 truncate text-sm font-semibold sm:text-base">
             Gate Pass — {asset.assetCode}
@@ -465,16 +586,17 @@ export function AssetGatePass({
         </DialogHeader>
 
         <div className="flex-1 overflow-auto bg-muted/40 p-3 sm:p-6">
-          <GatePassCard
-            title="Gate Pass"
-            location={asset.location ?? undefined}
-            createdBy={createdBy}
-            refNo={`AST-${asset.assetCode}`}
-            accentHex="#94a3b8"
-            footerNote="This pass must be presented at the security checkpoint."
-            fields={fields}
-            printId={PRINT_ID}
-          />
+          <SheetPreview>
+            <GatePassSheet
+              printId={PRINT_ID}
+              title="Gate Pass"
+              location={asset.location ?? undefined}
+              createdBy={createdBy}
+              refNo={`AST-${asset.assetCode}`}
+              footerNote="This pass must be presented at the security checkpoint."
+              fields={fields}
+            />
+          </SheetPreview>
         </div>
 
         <GatePassFooter onClose={onClose} printId={PRINT_ID} />
@@ -493,7 +615,7 @@ export interface MaintenanceGatePassProps {
   updatedBy?: string;
   userLocation?: string;
   assetName?: string;
-  loading?: boolean; // ← add
+  loading?: boolean;
 }
 
 type ExtendedMaintenance = Maintenance & {
@@ -511,7 +633,7 @@ export function MaintenanceGatePass({
   updatedBy,
   userLocation,
   assetName,
-  loading, // ← add
+  loading,
 }: MaintenanceGatePassProps) {
   const completedAt = React.useMemo(() => {
     if (!maintenance || maintenance.status !== "Completed") return null;
@@ -533,9 +655,9 @@ export function MaintenanceGatePass({
     { label: "Priority", value: m.priority },
     { label: "Status", value: m.status },
     { label: "Asset Code", value: m.assetCode, mono: true },
-    { label: "Asset Name / Model", value: resolvedAssetName },
-    { label: "Issue Title", value: m.issueTitle, span: 2 },
-    { label: "Description", value: m.description || "—", span: 3 },
+    { label: "Asset Name / Model", value: resolvedAssetName, span: 2 },
+    { label: "Issue Title", value: m.issueTitle, span: 3 },
+    { label: "Description", value: m.description || "—", span: 3, clamp: 2 },
     { label: "Location", value: resolvedLocation },
     { label: "Reported Date", value: m.reportedDate },
     ...(isCompleted
@@ -547,7 +669,7 @@ export function MaintenanceGatePass({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
+      <DialogContent className="flex max-h-[96dvh] w-[96vw] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:w-[95vw] [&>button]:hidden">
         <DialogHeader className="flex flex-row items-center justify-between space-y-0 border-b px-4 py-4 sm:px-6">
           <DialogTitle className="min-w-0 truncate text-sm font-semibold sm:text-base">
             Maintenance Gate Pass — {m.ticketNo}
@@ -571,19 +693,22 @@ export function MaintenanceGatePass({
               <span className="text-sm">Loading ticket details...</span>
             </div>
           ) : (
-            <GatePassCard
-              title="Maintenance Gate Pass"
-              location={resolvedLocation !== "—" ? resolvedLocation : undefined}
-              createdBy={createdBy}
-              updatedBy={updatedBy}
-              refNo={m.ticketNo}
-              accentHex="#c2410c"
-              footerNote="Present this pass when collecting the repaired asset."
-              fields={fields}
-              printId={PRINT_ID}
-              completedAt={completedAt}
-              isCompleted={isCompleted}
-            />
+            <SheetPreview>
+              <GatePassSheet
+                printId={PRINT_ID}
+                title="Returnable Gate Pass"
+                location={
+                  resolvedLocation !== "—" ? resolvedLocation : undefined
+                }
+                createdBy={createdBy}
+                updatedBy={updatedBy}
+                refNo={m.ticketNo}
+                footerNote="Present this pass when collecting the repaired asset."
+                fields={fields}
+                completedAt={completedAt}
+                isCompleted={isCompleted}
+              />
+            </SheetPreview>
           )}
         </div>
 

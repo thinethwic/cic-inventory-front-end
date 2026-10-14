@@ -46,10 +46,11 @@ import {
 import { AssetGatePass } from "@/components/Gatepassprint";
 import { AssetAttachments } from "@/Pages/components/AssetAttachments";
 
-import { useAuth } from "@/lib/auth";
+import { useAuth, useUser } from "@/lib/auth";
 import { useManagementApi } from "@/lib/management-api";
 import { useAssetApi } from "@/lib/api";
 import { useAssetAttachmentApi } from "@/lib/asset-attachment-api";
+import { useCategoryApi } from "@/lib/category-api";
 import { ApiError } from "@/lib/http";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -117,7 +118,7 @@ import type {
   Location,
   Supplier,
 } from "@/types";
-import { statusOptions, categoryOptions, emptyAssetForm } from "@/types";
+import { statusOptions, emptyAssetForm } from "@/types";
 import QRCodeLib from "qrcode";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +127,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+// Special Select value that opens the "Add new category" dialog
 const CUSTOM_CATEGORY_VALUE = "__CUSTOM_CATEGORY__";
 
 // ─── Debounce hook ─────────────────────────────────────────────────────────────
@@ -136,6 +138,21 @@ function useDebounce<T>(value: T, delay = 300): T {
     return () => clearTimeout(id);
   }, [value, delay]);
   return debounced;
+}
+
+// ─── Category helper ──────────────────────────────────────────────────────────
+// Merges category name lists, removes case-insensitive duplicates, sorts A-Z
+function mergeCategories(...lists: string[][]): string[] {
+  const map = new Map<string, string>();
+  for (const list of lists) {
+    for (const raw of list) {
+      const name = raw?.trim();
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), name);
+      }
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
 }
 
 // ─── Sorting ──────────────────────────────────────────────────────────────────
@@ -365,7 +382,7 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
   onDelete,
   onViewQR,
   onGatePass,
-  isAdmin, // ← ADD THIS
+  isAdmin,
 }: AssetDetailSheetProps) {
   const handleGatePass = React.useCallback(() => {
     if (asset) {
@@ -1298,9 +1315,16 @@ export default function Assets() {
   const [locationFilter, setLocationFilter] = React.useState("All");
 
   const { isLoaded, isSignedIn } = useAuth();
+  const { user } = useUser();
+  // Logged-in user's name, printed under "Prepared By" on the gate pass
+  const currentUserName =
+    user?.fullName ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    undefined;
   const managementApi = useManagementApi();
   const { getPage, getByScan, create, update, remove } = useAssetApi();
   const { upload: uploadAttachment } = useAssetAttachmentApi();
+  const { loadCategories: fetchCategories, createCategory } = useCategoryApi();
 
   const [allAssets, setAllAssets] = React.useState<Asset[]>([]);
   const [totalElements, setTotalElements] = React.useState(0);
@@ -1356,9 +1380,14 @@ export default function Assets() {
   const [detailAsset, setDetailAsset] = React.useState<Asset | null>(null);
   const [detailOpen, setDetailOpen] = React.useState(false);
 
-  const [customCategory, setCustomCategory] = React.useState("");
-  const [allCategoryOptions, setAllCategoryOptions] =
-    React.useState<string[]>(categoryOptions);
+  // ── Categories (loaded from the categories table) ───────────────────────────
+  const [allCategoryOptions, setAllCategoryOptions] = React.useState<string[]>(
+    [],
+  );
+  const [categoryDialogOpen, setCategoryDialogOpen] = React.useState(false);
+  const [newCategoryName, setNewCategoryName] = React.useState("");
+  const [categorySaving, setCategorySaving] = React.useState(false);
+  const [categoryError, setCategoryError] = React.useState<string | null>(null);
 
   const lookupsLoadedRef = React.useRef(false);
   const loadingRef = React.useRef(false);
@@ -1408,15 +1437,6 @@ export default function Assets() {
       setAllAssets(result.content);
       setTotalElements(result.totalElements);
       setServerTotalPages(Math.max(result.totalPages, 1));
-
-      const dbCategories = result.content
-        .map((a) => a.category?.trim())
-        .filter((c): c is string => !!c);
-      setAllCategoryOptions((prev) =>
-        Array.from(new Set([...prev, ...dbCategories])).sort((a, b) =>
-          a.localeCompare(b),
-        ),
-      );
     } catch (err) {
       console.error("loadPage failed:", err);
       setAllAssets([]);
@@ -1489,6 +1509,79 @@ export default function Assets() {
     scanRef.current?.focus();
   }, []);
 
+  // ── Load categories from the categories table ──────────────────────────────
+  const loadCategoryOptions = React.useCallback(async () => {
+    if (!isLoaded || !isSignedIn) return;
+    try {
+      const list = await fetchCategories();
+      setAllCategoryOptions((prev) =>
+        mergeCategories(
+          prev,
+          list.map((c) => c.name),
+        ),
+      );
+    } catch (err) {
+      console.error("loadCategories failed:", err);
+    }
+  }, [isLoaded, isSignedIn, fetchCategories]);
+
+  React.useEffect(() => {
+    loadCategoryOptions();
+  }, [loadCategoryOptions]);
+
+  const openCategoryDialog = React.useCallback(() => {
+    setNewCategoryName("");
+    setCategoryError(null);
+    setCategoryDialogOpen(true);
+  }, []);
+
+  const handleCreateCategory = React.useCallback(async () => {
+    const name = newCategoryName.trim();
+    if (!name) {
+      setCategoryError("Category name is required.");
+      return;
+    }
+
+    // Already exists: just select it
+    const existing = allCategoryOptions.find(
+      (c) => c.toLowerCase() === name.toLowerCase(),
+    );
+    if (existing) {
+      setForm((p) => ({ ...p, category: existing }));
+      setCategoryDialogOpen(false);
+      return;
+    }
+
+    setCategorySaving(true);
+    setCategoryError(null);
+    try {
+      const created = await createCategory({ name });
+      setAllCategoryOptions((prev) => mergeCategories(prev, [created.name]));
+      setForm((p) => ({ ...p, category: created.name }));
+      toast.success("Category added", { description: created.name });
+      setCategoryDialogOpen(false);
+    } catch (e) {
+      const msg =
+        e instanceof ApiError &&
+        e.validationErrors &&
+        Object.keys(e.validationErrors).length > 0
+          ? Object.values(e.validationErrors).join(" ")
+          : e instanceof Error
+            ? e.message
+            : "Failed to add category.";
+      setCategoryError(msg);
+    } finally {
+      setCategorySaving(false);
+    }
+  }, [newCategoryName, allCategoryOptions, createCategory]);
+
+  // Ensures the form's current value is always in the dropdown (e.g. old categories)
+  const formCategoryOptions = React.useMemo(
+    () =>
+      mergeCategories(allCategoryOptions, form.category ? [form.category] : []),
+    [allCategoryOptions, form.category],
+  );
+
   // ── Derived supplier/location options for filter dropdowns ─────────────────
   // Sourced from the independently-loaded master lists (not the current asset
   // page) so the dropdowns list every supplier/location, not just the ones
@@ -1496,7 +1589,9 @@ export default function Assets() {
   const supplierOptions = React.useMemo(
     () =>
       Array.from(
-        new Set(suppliers.map((s) => s.name?.trim()).filter((s): s is string => !!s)),
+        new Set(
+          suppliers.map((s) => s.name?.trim()).filter((s): s is string => !!s),
+        ),
       ).sort(),
     [suppliers],
   );
@@ -1504,7 +1599,9 @@ export default function Assets() {
   const locationOptions = React.useMemo(
     () =>
       Array.from(
-        new Set(locations.map((l) => l.name?.trim()).filter((l): l is string => !!l)),
+        new Set(
+          locations.map((l) => l.name?.trim()).filter((l): l is string => !!l),
+        ),
       ).sort(),
     [locations],
   );
@@ -1536,7 +1633,6 @@ export default function Assets() {
   const openAdd = React.useCallback(() => {
     setEditingId(null);
     setForm(emptyAssetForm);
-    setCustomCategory("");
     setStagedAttachments([]);
     setSaveError(null);
     setOpenForm(true);
@@ -1553,9 +1649,6 @@ export default function Assets() {
         (emp) =>
           `${emp.empId} - ${emp.name}`.trim() === asset.assignedTo?.trim(),
       );
-      const existingCategory = asset.category ?? "Laptop";
-      const isPredefinedCategory =
-        allCategoryOptions.includes(existingCategory);
       const matchingSupplier =
         suppliers.find((s) => s.id === asset.supplierId) ??
         suppliers.find((s) => s.name?.trim() === asset.supplierName?.trim());
@@ -1563,9 +1656,7 @@ export default function Assets() {
       setForm({
         assetCode: asset.assetCode ?? "",
         barcode: asset.barcode ?? "",
-        category: isPredefinedCategory
-          ? existingCategory
-          : CUSTOM_CATEGORY_VALUE,
+        category: asset.category ?? "",
         brand: asset.brand ?? "",
         model: asset.model ?? "",
         serialNo: asset.serialNo ?? "",
@@ -1577,26 +1668,23 @@ export default function Assets() {
         warrantyEnd: asset.warrantyEnd ?? "",
       });
 
-      setCustomCategory(isPredefinedCategory ? "" : existingCategory);
       setStagedAttachments([]);
       setSaveError(null);
       setOpenForm(true);
     },
-    [locations, employees, suppliers, allCategoryOptions],
+    [locations, employees, suppliers],
   );
 
   const validateForm = React.useCallback((): string | null => {
     if (!form.assetCode.trim()) return "Asset code is required.";
+    if (!form.category.trim()) return "Category is required.";
     if (!form.brand.trim()) return "Brand is required.";
     if (!form.model.trim()) return "Model is required.";
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
     if (!form.supplierId?.trim()) return "Supplier is required.";
-    if (form.category === CUSTOM_CATEGORY_VALUE && !customCategory.trim()) {
-      return "Custom category is required.";
-    }
     return null;
-  }, [form, customCategory]);
+  }, [form]);
 
   // ── Save ───────────────────────────────────────────────────────────────────
   const save = React.useCallback(async () => {
@@ -1614,12 +1702,7 @@ export default function Assets() {
     setSaving(true);
     setSaveError(null);
 
-    const finalCategory =
-      form.category === CUSTOM_CATEGORY_VALUE
-        ? customCategory.trim()
-        : form.category;
-
-    const payload: AssetFormState = { ...form, category: finalCategory };
+    const payload: AssetFormState = { ...form };
     const wasEditing = !!editingId;
 
     try {
@@ -1660,12 +1743,6 @@ export default function Assets() {
         }
       }
 
-      if (finalCategory && !allCategoryOptions.includes(finalCategory)) {
-        setAllCategoryOptions((prev) =>
-          [...prev, finalCategory].sort((a, b) => a.localeCompare(b)),
-        );
-      }
-
       // Reconcile with the server in the background — the table is already
       // showing the right content, so this just dims briefly rather than
       // blanking out while it re-syncs pagination/sort/filter truth.
@@ -1677,18 +1754,19 @@ export default function Assets() {
 
       setOpenForm(false);
       setForm(emptyAssetForm);
-      setCustomCategory("");
       setStagedAttachments([]);
     } catch (e) {
       console.error("save asset failed:", e);
       const msg =
-        e instanceof ApiError && e.validationErrors && Object.keys(e.validationErrors).length > 0
+        e instanceof ApiError &&
+        e.validationErrors &&
+        Object.keys(e.validationErrors).length > 0
           ? Object.values(e.validationErrors).join(" ")
           : e instanceof Error
             ? e.message
             : "Failed to save asset. Please try again.";
       setSaveError(msg);
-      toast.error("Save failed", { description: msg }); // ← NEW
+      toast.error("Save failed", { description: msg });
     } finally {
       setSaving(false);
     }
@@ -1697,13 +1775,11 @@ export default function Assets() {
     isLoaded,
     isSignedIn,
     form,
-    customCategory,
     editingId,
     update,
     create,
     stagedAttachments,
     uploadAttachment,
-    allCategoryOptions,
     loadPage,
   ]);
 
@@ -1760,7 +1836,7 @@ export default function Assets() {
       }
 
       setDeleteError(message);
-      toast.error("Delete failed", { description: message }); // ← NEW
+      toast.error("Delete failed", { description: message });
     } finally {
       setDeleteLoading(false);
     }
@@ -1995,9 +2071,7 @@ export default function Assets() {
           <div className="flex items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-base">
               Asset List{" "}
-              <span className="text-muted-foreground">
-                ({totalElements})
-              </span>
+              <span className="text-muted-foreground">({totalElements})</span>
               {pageLoading && allAssets.length > 0 && (
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
               )}
@@ -2307,36 +2381,38 @@ export default function Assets() {
                 />
               </div>
 
-              {/* Category */}
+              {/* Category — from the categories table, with "Add new category" pop-up */}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Category</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Category *
+                </Label>
                 <Select
                   value={form.category}
-                  onValueChange={(v) => setForm((p) => ({ ...p, category: v }))}
+                  onValueChange={(v) => {
+                    if (v === CUSTOM_CATEGORY_VALUE) {
+                      openCategoryDialog();
+                      return;
+                    }
+                    setForm((p) => ({ ...p, category: v }));
+                  }}
                   disabled={saving}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
-                    {allCategoryOptions.map((c) => (
+                    {formCategoryOptions.map((c) => (
                       <SelectItem key={c} value={c}>
                         {c}
                       </SelectItem>
                     ))}
                     <SelectItem value={CUSTOM_CATEGORY_VALUE}>
-                      Other / Add New Category
+                      <span className="flex items-center gap-2 font-medium text-primary">
+                        <Plus className="h-3.5 w-3.5" /> Add new category
+                      </span>
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                {form.category === CUSTOM_CATEGORY_VALUE && (
-                  <Input
-                    value={customCategory}
-                    onChange={(e) => setCustomCategory(e.target.value)}
-                    placeholder="Enter new category"
-                    disabled={saving}
-                  />
-                )}
               </div>
 
               {/* Status */}
@@ -2390,7 +2466,9 @@ export default function Assets() {
 
               {/* Serial No */}
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Serial No *</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Serial No *
+                </Label>
                 <Input
                   value={form.serialNo}
                   onChange={(e) =>
@@ -2403,7 +2481,9 @@ export default function Assets() {
 
               {/* Location — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <Label className="text-xs text-muted-foreground">Location *</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Location *
+                </Label>
                 <LocationCombobox
                   locations={locations}
                   value={form.locationId || ""}
@@ -2436,7 +2516,9 @@ export default function Assets() {
 
               {/* Supplier — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <Label className="text-xs text-muted-foreground">Supplier *</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Supplier *
+                </Label>
                 <SupplierCombobox
                   suppliers={suppliers}
                   value={form.supplierId?.trim() ? form.supplierId : ""}
@@ -2498,6 +2580,63 @@ export default function Assets() {
             <Button onClick={save} disabled={saving} type="button">
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingId ? "Save Changes" : "Create Asset"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Category Dialog (pop-up) ── */}
+      <Dialog
+        open={categoryDialogOpen}
+        onOpenChange={(open) => {
+          if (!categorySaving) setCategoryDialogOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add New Category</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label className="text-xs text-muted-foreground">
+              Category Name *
+            </Label>
+            <Input
+              autoFocus
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateCategory();
+                }
+              }}
+              placeholder="e.g. Printer"
+              disabled={categorySaving}
+            />
+            {categoryError && (
+              <p className="text-sm text-destructive">{categoryError}</p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setCategoryDialogOpen(false)}
+              disabled={categorySaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleCreateCategory}
+              disabled={categorySaving}
+            >
+              {categorySaving && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+              Add Category
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2565,6 +2704,7 @@ export default function Assets() {
         asset={gpAsset}
         open={!!gpAsset}
         onClose={() => setGpAsset(null)}
+        createdBy={currentUserName}
       />
     </div>
   );

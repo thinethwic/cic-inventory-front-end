@@ -12,11 +12,11 @@ import type {
     InventoryUserRole,
 } from "@/types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
-const API_BASE = `${BASE_URL}/api/v1`;
-const JWT_TEMPLATE = "cic-inventory";
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+export const API_BASE = `${BASE_URL}/api/v1`;
+export const JWT_TEMPLATE = "cic-inventory";
 
-type SpringPage<T> = {
+export type SpringPage<T> = {
     content: T[];
     totalElements: number;
     totalPages: number;
@@ -53,11 +53,11 @@ export type UserPayload = {
     isActive: boolean;
 };
 
-async function apiFetch<T>(
+export const apiFetch = async <T>(
     token: string,
     endpoint: string,
     init: RequestInit = {},
-): Promise<T> {
+): Promise<T> => {
     const url = endpoint.startsWith("/api/")
         ? `${BASE_URL}${endpoint}`
         : `${API_BASE}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
@@ -79,18 +79,18 @@ async function apiFetch<T>(
     return parseJsonOrThrow<T>(res);
 }
 
-function unwrap<T>(res: T[] | SpringPage<T>): T[] {
+export const unwrap = <T>(res: T[] | SpringPage<T>): T[] => {
     if (Array.isArray(res)) return res;
     return Array.isArray(res?.content) ? res.content : [];
-}
+};
 
-function body(payload: unknown): RequestInit {
+export const body = (payload: unknown): RequestInit => {
     return { body: JSON.stringify(payload) };
 }
 
 // All list endpoints get ?page=0&size=9999 to fetch every record,
 // bypassing the Spring default page size of 20.
-const ALL = "?page=0&size=9999";
+export const ALL = "?page=0&size=9999";
 
 export function useManagementApi() {
     const { getToken } = useAuth();
