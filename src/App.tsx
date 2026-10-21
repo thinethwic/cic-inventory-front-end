@@ -6,6 +6,7 @@ import AdminProtectedRoute from "./components/AdminProtectedRoute";
 import AdminOnlyRoute from "./components/AdminOnlyRoute";
 import SuperAdminRoute from "./components/SuperAdminRoute";
 import { usePageTitle } from "./hooks/usePageTitle";
+import PublicOnlyRoute from "./components/PublicOnlyRoute";
 
 const LoginPage = lazy(() => import("./Pages/LoginPage"));
 const Dashboard = lazy(() => import("./Pages/DashboardPage"));
@@ -37,9 +38,11 @@ export default function App() {
       <Route
         path="/login"
         element={
-          <LazyPage>
-            <LoginPage />
-          </LazyPage>
+          <PublicOnlyRoute>
+            <LazyPage>
+              <LoginPage />
+            </LazyPage>
+          </PublicOnlyRoute>
         }
       />
       {/* Protected Layout: all logged-in roles */}

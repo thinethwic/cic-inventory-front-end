@@ -765,6 +765,15 @@ export default function MaintenancePage() {
     return brandModel || gpAsset.assetCode;
   }, [gpAsset]);
 
+  const selectedAsset = React.useMemo(
+    () => assets.find((a) => String(a.id) === form.assetId),
+    [assets, form.assetId],
+  );
+  const selectedAssetName = selectedAsset
+    ? `${selectedAsset.brand ?? ""} ${selectedAsset.model ?? ""}`.trim() ||
+      selectedAsset.assetCode
+    : "";
+
   // ── Dialog helpers ─────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
@@ -1308,10 +1317,35 @@ export default function MaintenancePage() {
                   disabled={saveMutation.isPending}
                 />
               )}
+
+              {selectedAsset && (
+                <div className="mt-2 grid grid-cols-1 gap-3 rounded-md border bg-muted/40 px-3 py-2.5 sm:grid-cols-3">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Asset Code</p>
+                    <p className="truncate font-mono text-sm font-medium">
+                      {selectedAsset.assetCode}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Asset Name</p>
+                    <p className="truncate text-sm font-medium">
+                      {selectedAssetName}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Serial No</p>
+                    <p className="truncate font-mono text-sm font-medium">
+                      {selectedAsset.serialNo || "—"}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Issue Title *</Label>
+              <Label className="text-xs text-muted-foreground">
+                Issue Title *
+              </Label>
               <Input
                 value={form.issueTitle}
                 onChange={(e) =>
@@ -1323,7 +1357,9 @@ export default function MaintenancePage() {
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Description</Label>
+              <Label className="text-xs text-muted-foreground">
+                Description
+              </Label>
               <Input
                 value={form.description ?? ""}
                 onChange={(e) =>
@@ -1336,7 +1372,9 @@ export default function MaintenancePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Priority</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Priority
+                </Label>
                 <Select
                   value={form.priority}
                   onValueChange={(v) =>
@@ -1397,7 +1435,9 @@ export default function MaintenancePage() {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Location</Label>
+                <Label className="text-xs text-muted-foreground">
+                  Location
+                </Label>
                 <Input
                   value={form.location ?? ""}
                   onChange={(e) =>
@@ -1412,7 +1452,9 @@ export default function MaintenancePage() {
             {isAdmin && (
               <>
                 <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Due Date</Label>
+                  <Label className="text-xs text-muted-foreground">
+                    Due Date
+                  </Label>
                   <Input
                     type="date"
                     value={form.dueDate ?? ""}

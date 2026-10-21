@@ -33,8 +33,8 @@ const SHEET_H_PX = 1122.5; // 297mm
 
 const COPY_LABELS = ["Security Copy", "Original"] as const;
 
-const BASE_FONT = "'Segoe UI', Arial, sans-serif";
-const MONO_FONT = "'Courier New', Courier, monospace";
+const BASE_FONT = "Arial, 'Liberation Sans', Helvetica, sans-serif,'Segoe UI'";
+const MONO_FONT = "'Courier New', 'Liberation Mono', Courier, monospace";
 
 // The gate pass is black & white only
 const INK = "#000";
@@ -155,8 +155,6 @@ function SignatureBlock({
   isFirst: boolean;
   isCompleted?: boolean;
 }) {
-  // First block: completed → show updatedBy under "Issued By"
-  //              otherwise  → show createdBy under "Prepared By"
   const nameToShow = isFirst
     ? isCompleted
       ? updatedBy
@@ -172,20 +170,22 @@ function SignatureBlock({
         {label}
       </p>
 
-      {isFirst && nameToShow && (
-        <p className="mb-0 mt-0.5 text-[12px] font-bold text-black">
-          {nameToShow}
-        </p>
-      )}
-
+      {/* Fixed signing area: same height for every block so lines align */}
       <div
         style={{
-          marginTop: isFirst && nameToShow ? 6 : 20,
+          height: 32, // ← increase/decrease this for more/less signature space
           borderBottom: `1px solid ${INK}`,
         }}
-      />
+      >
+        {nameToShow && (
+          <p className="mb-0 mt-0.5 text-[12px] font-bold text-black">
+            {nameToShow}
+          </p>
+        )}
+      </div>
+
       <p className="mb-0 mt-0.5 text-[9px] text-[#444]">
-        {isFirst && nameToShow ? "Signature / Date" : "Name / Signature / Date"}
+        {nameToShow ? "Signature / Date" : "Name / Signature / Date"}
       </p>
     </div>
   );
@@ -426,7 +426,7 @@ function GatePassSheet({
           key={label}
           style={{
             height: "148.5mm",
-            padding: "7mm 8mm",
+            padding: "5mm 8mm",
             boxSizing: "border-box",
           }}
         >
