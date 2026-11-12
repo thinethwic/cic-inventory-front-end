@@ -72,9 +72,7 @@ export const apiFetch = async <T>(
         },
     });
 
-    if (res.status === 401) {
-        clearPersistedAuthSession();
-    }
+    if (res.status === 401) clearPersistedAuthSession();
 
     return parseJsonOrThrow<T>(res);
 }

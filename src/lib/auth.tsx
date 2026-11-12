@@ -13,8 +13,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+import { toast } from "sonner";
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim();
 const STORAGE_KEY = "cic-inventory";
+const SESSION_EXPIRED_EVENT = "auth:session-expired";
 
 type BackendUser = {
   id: number;
@@ -100,6 +103,8 @@ function writeStoredSession(session: StoredSession | null) {
 
 export function clearPersistedAuthSession() {
   writeStoredSession(null);
+  // Tell the AuthProvider so React state is cleared too
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 
 function isExpired(expiresAt: string) {
@@ -197,6 +202,54 @@ export function AuthProvider({
 
     return refreshPromiseRef.current;
   }, [clearSession, refreshAccessToken]);
+
+  // A 401 anywhere in the app (or another tab logging out) ends the session here
+  React.useEffect(() => {
+    const onExpired = () => {
+      setSession(null);
+      toast.error("Your session has expired. Please sign in again.", {
+        id: "session-expired",
+      });
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue === null) setSession(null);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  // While signed in, re-check the token every 30s and when the tab regains focus.
+  // If the refresh fails, getValidAccessToken clears the session and the user is
+  // sent to /login.
+  const signedIn = !!session;
+  React.useEffect(() => {
+    if (!signedIn) return;
+
+    const check = async () => {
+      const token = await getValidAccessToken();
+      if (!token) {
+        toast.error("Your session has expired. Please sign in again.", {
+          id: "session-expired",
+        });
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+
+    const id = window.setInterval(() => void check(), 30_000);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", check);
+    };
+  }, [signedIn, getValidAccessToken]);
 
   React.useEffect(() => {
     let cancelled = false;

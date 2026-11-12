@@ -109,9 +109,7 @@ export async function apiFetch<T>(
         throw new Error(`Network error: ${String(err)}`);
     }
 
-    if (res.status === 401) {
-        clearPersistedAuthSession();
-    }
+    if (res.status === 401) clearPersistedAuthSession();
 
     return parseJsonOrThrow<T>(res);
 }

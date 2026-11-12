@@ -46,6 +46,7 @@ interface RawAsset {
     locationId?: number | null;       // flat field from AssetResponseDTO
     assignedTo?: string | RawEmployee | null;
     assignedToId?: number | null;     // flat field from AssetResponseDTO
+    assetValue?: number | null;
     supplierId?: number | null;
     supplierName?: string | null;
     purchaseDate?: string | null;
@@ -165,6 +166,7 @@ function toAsset(raw: RawAsset): Asset {
         // Prefer flat fields from AssetResponseDTO, fall back to nested object
         locationId: getLocationId(raw.location, raw.locationId),
         assignedToId: getAssignedToId(raw.assignedTo, raw.assignedToId),
+        assetValue: raw.assetValue ?? null,
         supplierId: raw.supplierId ?? undefined,
         supplierName: raw.supplierName ?? undefined,
         purchaseDate: raw.purchaseDate ?? "",
@@ -186,6 +188,7 @@ function toRequestBody(form: AssetFormState) {
         supplierId: form.supplierId?.trim() ? Number(form.supplierId) : null,
         purchaseDate: form.purchaseDate || null,
         warrantyEnd: form.warrantyEnd || null,
+        assetValue: form.assetValue?.trim() ? Number(form.assetValue) : null,
     };
 }
 
@@ -206,9 +209,7 @@ function buildPageParams(params: FetchAssetsParams): URLSearchParams {
 
 // ─── Response helper ──────────────────────────────────────────────────────────
 async function handleResponse<T>(res: Response): Promise<T> {
-    if (res.status === 401) {
-        clearPersistedAuthSession();
-    }
+    if (res.status === 401) clearPersistedAuthSession();
     return parseJsonOrThrow<T>(res);
 }
 
@@ -545,6 +546,7 @@ export function useAssetApi() {
                     supplierId: raw.supplierId ?? null,
                     purchaseDate: raw.purchaseDate ?? null,
                     warrantyEnd: raw.warrantyEnd ?? null,
+                    assetValue: raw.assetValue ?? null,
                 };
 
                 // Step 5: PUT

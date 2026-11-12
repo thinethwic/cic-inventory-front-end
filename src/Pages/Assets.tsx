@@ -32,6 +32,7 @@ import {
   Info,
   Search,
   Check,
+  Banknote,
 } from "lucide-react";
 
 import {
@@ -154,6 +155,13 @@ function mergeCategories(...lists: string[][]): string[] {
   }
   return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
 }
+
+const formatCurrency = (v: number) =>
+  new Intl.NumberFormat("en-LK", {
+    style: "currency",
+    currency: "LKR",
+    minimumFractionDigits: 2,
+  }).format(v);
 
 // ─── Sorting ──────────────────────────────────────────────────────────────────
 type SortKey =
@@ -546,6 +554,18 @@ const AssetDetailSheet = React.memo(function AssetDetailSheet({
                             day: "numeric",
                           },
                         )
+                      : undefined
+                  }
+                />
+              )}
+
+              {isAdmin && (
+                <DetailRow
+                  icon={Banknote}
+                  label="Asset Value"
+                  value={
+                    asset.assetValue != null
+                      ? formatCurrency(asset.assetValue)
                       : undefined
                   }
                 />
@@ -1582,6 +1602,35 @@ export default function Assets() {
     [allCategoryOptions, form.category],
   );
 
+  // Only employees from the selected location can be assigned.
+  // The currently selected employee is always kept in the list so an existing
+  // asset still displays its assignee when opened for editing.
+  const employeesForLocation = React.useMemo(() => {
+    if (!form.locationId) return [];
+    return employees.filter(
+      (e) =>
+        String(e.location?.id) === form.locationId ||
+        String(e.id) === form.assignedToId,
+    );
+  }, [employees, form.locationId, form.assignedToId]);
+
+  // Changing location clears the assignee if they belong to a different location
+  const handleLocationChange = React.useCallback(
+    (locationId: string) => {
+      setForm((p) => {
+        const assigned = employees.find((e) => String(e.id) === p.assignedToId);
+        const stillValid =
+          !!assigned && String(assigned.location?.id) === locationId;
+        return {
+          ...p,
+          locationId,
+          assignedToId: stillValid ? p.assignedToId : "",
+        };
+      });
+    },
+    [employees],
+  );
+
   // ── Derived supplier/location options for filter dropdowns ─────────────────
   // Sourced from the independently-loaded master lists (not the current asset
   // page) so the dropdowns list every supplier/location, not just the ones
@@ -1666,6 +1715,7 @@ export default function Assets() {
         supplierId: matchingSupplier ? String(matchingSupplier.id) : "",
         purchaseDate: asset.purchaseDate ?? "",
         warrantyEnd: asset.warrantyEnd ?? "",
+        assetValue: asset.assetValue != null ? String(asset.assetValue) : "",
       });
 
       setStagedAttachments([]);
@@ -1683,6 +1733,10 @@ export default function Assets() {
     if (!form.serialNo.trim()) return "Serial number is required.";
     if (!form.locationId.trim()) return "Location is required.";
     if (!form.supplierId?.trim()) return "Supplier is required.";
+    const value = form.assetValue?.trim();
+    if (value && !/^\d{1,13}(\.\d{1,2})?$/.test(value)) {
+      return "Asset value must be a non-negative amount with at most 2 decimal places.";
+    }
     return null;
   }, [form]);
 
@@ -1702,7 +1756,10 @@ export default function Assets() {
     setSaving(true);
     setSaveError(null);
 
-    const payload: AssetFormState = { ...form };
+    const payload: AssetFormState = {
+      ...form,
+      assetValue: form.assetValue?.trim() || undefined,
+    };
     const wasEditing = !!editingId;
 
     try {
@@ -2487,19 +2544,18 @@ export default function Assets() {
                 <LocationCombobox
                   locations={locations}
                   value={form.locationId || ""}
-                  onChange={(v) => setForm((p) => ({ ...p, locationId: v }))}
+                  onChange={handleLocationChange} // ← was: (v) => setForm(...)
                   disabled={saving}
                   loading={lookupLoading}
                 />
               </div>
 
-              {/* Assigned To — searchable combobox */}
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
                 <Label className="text-xs text-muted-foreground">
                   Assigned To (optional)
                 </Label>
                 <EmployeeCombobox
-                  employees={employees}
+                  employees={employeesForLocation} // ← filtered list
                   value={
                     form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
                   }
@@ -2509,9 +2565,14 @@ export default function Assets() {
                       assignedToId: v === "__NONE__" ? "" : v,
                     }))
                   }
-                  disabled={saving}
+                  disabled={saving || !form.locationId} // ← disabled until a location is chosen
                   loading={lookupLoading}
                 />
+                {!form.locationId && (
+                  <p className="text-xs text-muted-foreground">
+                    Select a location first to see its employees.
+                  </p>
+                )}
               </div>
 
               {/* Supplier — searchable combobox */}
@@ -2554,6 +2615,25 @@ export default function Assets() {
                   onChange={(e) =>
                     setForm((p) => ({ ...p, warrantyEnd: e.target.value }))
                   }
+                  disabled={saving}
+                />
+              </div>
+
+              {/* Asset Value */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">
+                  Asset Value (LKR, optional)
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={form.assetValue ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, assetValue: e.target.value }))
+                  }
+                  placeholder="0.00"
                   disabled={saving}
                 />
               </div>

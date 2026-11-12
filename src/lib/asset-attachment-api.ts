@@ -29,9 +29,7 @@ async function authorizedFetch(token: string, url: string, init: RequestInit = {
             Authorization: `Bearer ${token}`,
         },
     });
-    if (res.status === 401) {
-        clearPersistedAuthSession();
-    }
+    if (res.status === 401) clearPersistedAuthSession();
     return res;
 }
 

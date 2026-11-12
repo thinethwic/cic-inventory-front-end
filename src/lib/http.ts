@@ -1,3 +1,4 @@
+import { clearPersistedAuthSession } from "@/lib/auth";
 // src/lib/http.ts
 // Shared response-parsing helper used by every API module so a failed
 // request always yields the same shape, regardless of which module made it.
@@ -28,6 +29,9 @@ export class ApiError extends Error {
  */
 export async function parseJsonOrThrow<T>(res: Response): Promise<T> {
     if (!res.ok) {
+
+        if (res.status === 401) clearPersistedAuthSession();
+
         const text = await res.text().catch(() => "");
         let message = `Request failed with status ${res.status}`;
         let errorCode: string | undefined;

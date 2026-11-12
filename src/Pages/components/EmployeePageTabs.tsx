@@ -711,20 +711,48 @@ export function EmployeesTab({
   const [editing, setEditing] = React.useState<Employee | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  const blankForm = React.useCallback(
-    (): EmployeeFormState => ({
+  const blankForm = React.useCallback((): EmployeeFormState => {
+    const locationId = String(locations[0]?.id ?? "");
+    const firstDept = departments.find(
+      (d) => String(d.location?.id) === locationId,
+    );
+    return {
       empId: "",
       name: "",
-      departmentId: String(departments[0]?.id ?? ""),
-      locationId: String(locations[0]?.id ?? ""),
+      departmentId: String(firstDept?.id ?? ""),
+      locationId,
       phone_no: "",
       email: "",
       employeeStatus: "ACTIVE",
-    }),
-    [departments, locations],
-  );
+    };
+  }, [departments, locations]);
 
   const [form, setForm] = React.useState<EmployeeFormState>(blankForm);
+
+  // Only departments of the selected location can be chosen.
+  // The currently selected department is kept so an existing employee
+  // still displays correctly when opened for editing.
+  const departmentsForLocation = React.useMemo(() => {
+    if (!form.locationId) return [];
+    return departments.filter(
+      (d) =>
+        String(d.location?.id) === form.locationId ||
+        String(d.id) === form.departmentId,
+    );
+  }, [departments, form.locationId, form.departmentId]);
+
+  // Changing location clears the department if it belongs to a different location
+  const handleLocationChange = (locationId: string) => {
+    setForm((p) => {
+      const dept = departments.find((d) => String(d.id) === p.departmentId);
+      const stillValid = !!dept && String(dept.location?.id) === locationId;
+      return {
+        ...p,
+        locationId,
+        departmentId: stillValid ? p.departmentId : "",
+      };
+    });
+  };
 
   const filtered = React.useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -1026,23 +1054,28 @@ export function EmployeesTab({
               </div>
 
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <FieldLabel>Department *</FieldLabel>
-                <DepartmentCombobox
-                  departments={departments}
-                  value={form.departmentId}
-                  onChange={(v) => f("departmentId", v)}
+                <FieldLabel>Location *</FieldLabel>
+                <LocationCombobox
+                  locations={locations}
+                  value={form.locationId}
+                  onChange={handleLocationChange} // ← was: (v) => f("locationId", v)
                   disabled={saving}
                 />
               </div>
 
               <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <FieldLabel>Location *</FieldLabel>
-                <LocationCombobox
-                  locations={locations}
-                  value={form.locationId}
-                  onChange={(v) => f("locationId", v)}
-                  disabled={saving}
+                <FieldLabel>Department *</FieldLabel>
+                <DepartmentCombobox
+                  departments={departmentsForLocation} // ← filtered list
+                  value={form.departmentId}
+                  onChange={(v) => f("departmentId", v)}
+                  disabled={saving || !form.locationId} // ← disabled until a location is chosen
                 />
+                {!form.locationId && (
+                  <p className="text-xs text-muted-foreground">
+                    Select a location first to see its departments.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">

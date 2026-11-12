@@ -26,9 +26,7 @@ async function apiFetch<T>(token: string, endpoint: string, init: RequestInit = 
     } catch (networkErr) {
         throw new Error(`Network error — is the backend running? (${String(networkErr)})`);
     }
-    if (res.status === 401) {
-        clearPersistedAuthSession();
-    }
+    if (res.status === 401) clearPersistedAuthSession();
     return parseJsonOrThrow<T>(res);
 }
 

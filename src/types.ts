@@ -46,6 +46,7 @@ export interface Asset {
     assignedToId?: string;
     purchaseDate?: string;
     warrantyEnd?: string;
+    assetValue?: number | null;
     supplierId?: number;
     supplierName?: string;
 }
@@ -63,6 +64,7 @@ export type AssetFormState = {
     assignedToId?: string;
     purchaseDate?: string;
     warrantyEnd?: string;
+    assetValue?: string;
     supplierId: string;
 };
 
@@ -78,6 +80,7 @@ export const emptyAssetForm: AssetFormState = {
     assignedToId: "",
     purchaseDate: "",
     warrantyEnd: "",
+    assetValue: "",
     supplierId: "",
 };
 

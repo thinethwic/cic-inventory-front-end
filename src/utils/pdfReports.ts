@@ -58,9 +58,9 @@ function addReportHeader(
 
     // Logo — top-right corner
     if (logoDataURL) {
-        const logoW = 60;
-        const logoH = 55;
-        doc.addImage(logoDataURL, "PNG", pageWidth - logoW - 12, 2, logoW, logoH);
+        const logoW = 40;
+        const logoH = 20;
+        doc.addImage(logoDataURL, "PNG", pageWidth - logoW - 16, 7, logoW, logoH);
     }
 
     // Title & meta — left side

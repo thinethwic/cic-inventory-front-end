@@ -1,7 +1,10 @@
 // src/components/GatePassPrint.tsx
 
 import * as React from "react";
-import { Printer, X, CheckCircle2, Loader2 } from "lucide-react";
+import { Printer, X, CheckCircle2, Loader2, Download } from "lucide-react";
+import html2canvas from "html2canvas-pro";
+import { jsPDF } from "jspdf";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,13 +36,66 @@ const SHEET_H_PX = 1122.5; // 297mm
 
 const COPY_LABELS = ["Security Copy", "Original"] as const;
 
-const BASE_FONT = "Arial, 'Liberation Sans', Helvetica, sans-serif,'Segoe UI'";
+// Fonts that exist (or have a same-size equivalent) on Windows, Mac and Linux,
+// so the fixed-height layout fits the same on every machine.
+const BASE_FONT = "Arial, 'Liberation Sans', Helvetica, sans-serif";
 const MONO_FONT = "'Courier New', 'Liberation Mono', Courier, monospace";
 
 // The gate pass is black & white only
 const INK = "#000";
 
-// ─── Print style injection — A4 portrait ──────────────────────────────────────
+// ─── Grayscale logo (CSS filters are ignored when rendering the PDF) ─────────
+
+let grayLogoPromise: Promise<string> | null = null;
+
+function loadGrayLogo(): Promise<string> {
+  if (!grayLogoPromise) {
+    grayLogoPromise = new Promise<string>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(logo);
+          ctx.drawImage(img, 0, 0);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const px = data.data;
+          for (let i = 0; i < px.length; i += 4) {
+            const g = Math.round(
+              px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114,
+            );
+            px[i] = px[i + 1] = px[i + 2] = g;
+          }
+          ctx.putImageData(data, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+        } catch {
+          resolve(logo);
+        }
+      };
+      img.onerror = () => resolve(logo);
+      img.src = logo;
+    });
+  }
+  return grayLogoPromise;
+}
+
+function useGrayLogo() {
+  const [src, setSrc] = React.useState<string>(logo);
+  React.useEffect(() => {
+    let alive = true;
+    void loadGrayLogo().then((s) => {
+      if (alive) setSrc(s);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return src;
+}
+
+// ─── Browser print (fallback only) ────────────────────────────────────────────
 
 function usePrintStyle(printId: string) {
   React.useEffect(() => {
@@ -84,9 +140,7 @@ function usePrintStyle(printId: string) {
   }, [printId]);
 }
 
-// ─── Print trigger ────────────────────────────────────────────────────────────
-
-function doPrint(printId: string) {
+function doBrowserPrint(printId: string) {
   const sheet = document.getElementById(printId);
   if (!sheet) return;
 
@@ -99,8 +153,6 @@ function doPrint(printId: string) {
     document.body.appendChild(portal);
   }
 
-  // The sheet itself is never scaled (only its preview wrapper is),
-  // so the clone prints at true A4 size.
   const clone = sheet.cloneNode(true) as HTMLElement;
   clone.style.boxShadow = "none";
 
@@ -111,6 +163,86 @@ function doPrint(printId: string) {
     if (portal) portal.innerHTML = "";
   }, 1000);
 }
+
+// ─── PDF generation (no browser headers / footers) ────────────────────────────
+
+async function buildPdfBlob(printId: string): Promise<Blob> {
+  const sheet = document.getElementById(printId);
+  if (!sheet) throw new Error("Gate pass not found");
+
+  // Render an unscaled copy off-screen so the preview scaling never affects the PDF
+  const host = document.createElement("div");
+  host.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:210mm;height:297mm;background:#fff;";
+  const clone = sheet.cloneNode(true) as HTMLElement;
+  clone.removeAttribute("id");
+  clone.style.boxShadow = "none";
+  host.appendChild(clone);
+  document.body.appendChild(host);
+
+  try {
+    if ("fonts" in document) await document.fonts.ready;
+
+    const canvas = await html2canvas(clone, {
+      scale: 3,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      logging: false,
+    });
+
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+      compress: true,
+    });
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.98), "JPEG", 0, 0, 210, 297);
+    return pdf.output("blob");
+  } finally {
+    host.remove();
+  }
+}
+
+async function printAsPdf(printId: string) {
+  const blob = await buildPdfBlob(printId);
+  const url = URL.createObjectURL(blob);
+
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;";
+  iframe.src = url;
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch {
+        // Browser blocked printing inside the frame: open the PDF in a tab instead
+        window.open(url, "_blank");
+      }
+    }, 300);
+  };
+  document.body.appendChild(iframe);
+
+  setTimeout(() => {
+    iframe.remove();
+    URL.revokeObjectURL(url);
+  }, 5 * 60_000);
+}
+
+async function downloadPdf(printId: string, fileName: string) {
+  const blob = await buildPdfBlob(printId);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+const safeFileName = (s: string) => s.replace(/[^\w.-]+/g, "_");
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -173,7 +305,7 @@ function SignatureBlock({
       {/* Fixed signing area: same height for every block so lines align */}
       <div
         style={{
-          height: 32, // ← increase/decrease this for more/less signature space
+          height: 30, // ← increase/decrease this for more/less signature space
           borderBottom: `1px solid ${INK}`,
         }}
       >
@@ -222,6 +354,7 @@ function GatePassCard({
   stamp,
   copyLabel,
 }: GatePassCardProps) {
+  const logoSrc = useGrayLogo();
   const firstSignatureLabel = isCompleted ? "Issued By" : "Prepared By";
   const signatureLabels = [
     firstSignatureLabel,
@@ -258,13 +391,13 @@ function GatePassCard({
 
       {/* Header */}
       <div
-        className="relative z-10 flex shrink-0 items-center justify-between gap-4 px-4 py-2.5"
+        className="relative z-10 flex shrink-0 items-center justify-between gap-4 px-4 py-1.5"
         style={{ borderBottom: `2px solid ${INK}` }}
       >
         {/* Left: Logo + Title + Location */}
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <img
-            src={logo}
+            src={logoSrc}
             alt="CIC Logo"
             className="h-[110px] w-auto max-w-[205px] shrink-0 object-contain"
             style={{ filter: "grayscale(1)" }}
@@ -330,7 +463,7 @@ function GatePassCard({
       </div>
 
       {/* Fields grid */}
-      <div className="relative z-10 grid min-h-0 flex-1 grid-cols-3 content-start gap-x-4 overflow-hidden px-4 pt-1">
+      <div className="relative z-10 grid min-h-0 flex-1 grid-cols-3 content-evenly gap-x-4 overflow-hidden px-4 pt-1">
         {fields.map((f) => (
           <div
             key={f.label}
@@ -339,7 +472,7 @@ function GatePassCard({
             }`}
             style={{ borderBottom: "1px dashed #777" }}
           >
-            <p className="m-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#444]">
+            <p className="m-0 text-[10px] font-bold uppercase leading-[1.2] tracking-[0.14em] text-[#444]">
               {f.label}
             </p>
             <p
@@ -353,6 +486,8 @@ function GatePassCard({
                       WebkitLineClamp: f.clamp,
                       WebkitBoxOrient: "vertical" as const,
                       overflow: "hidden",
+                      // explicit height so the PDF render clamps the same way
+                      maxHeight: `${f.clamp * 15 * 1.375}px`,
                     }
                   : {}),
               }}
@@ -363,7 +498,7 @@ function GatePassCard({
         ))}
       </div>
 
-      {/* Signature strip: Prepared/Issued, Authorised, Received, Security */}
+      {/* Signature strip: Prepared/Issued, Authorised, Security, Received */}
       <div className="relative z-10 mx-4 mt-2 grid shrink-0 grid-cols-4 gap-2">
         {signatureLabels.map((label, i) => (
           <SignatureBlock
@@ -401,7 +536,7 @@ function GatePassCard({
   );
 }
 
-// ─── A4 Portrait Sheet (Security copy on top, Customer copy below) ───────────
+// ─── A4 Portrait Sheet (Security copy on top, Original below) ────────────────
 
 function GatePassSheet({
   printId,
@@ -508,25 +643,78 @@ function SheetPreview({ children }: { children: React.ReactNode }) {
 function GatePassFooter({
   onClose,
   printId,
+  fileName,
 }: {
   onClose: () => void;
   printId: string;
+  fileName: string;
 }) {
+  const [busy, setBusy] = React.useState<"print" | "pdf" | null>(null);
+
+  const handlePrint = async () => {
+    setBusy("print");
+    try {
+      await printAsPdf(printId);
+    } catch (err) {
+      console.error("PDF print failed, falling back to browser print:", err);
+      doBrowserPrint(printId);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleDownload = async () => {
+    setBusy("pdf");
+    try {
+      await downloadPdf(printId, fileName);
+    } catch (err) {
+      console.error("PDF download failed:", err);
+      toast.error("Could not create the PDF");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3 border-t bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
       <p className="text-xs text-muted-foreground">
-        Prints on A4 portrait · Security copy + Customer copy
+        Prints on A4 portrait · Security copy + Original
       </p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row">
-        <Button variant="outline" onClick={onClose} type="button">
+        <Button
+          variant="outline"
+          onClick={onClose}
+          disabled={busy !== null}
+          type="button"
+        >
           Close
         </Button>
         <Button
-          onClick={() => doPrint(printId)}
+          variant="outline"
+          onClick={handleDownload}
+          disabled={busy !== null}
           className="gap-2"
           type="button"
         >
-          <Printer className="h-4 w-4" /> Print Gate Pass
+          {busy === "pdf" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+          Download PDF
+        </Button>
+        <Button
+          onClick={handlePrint}
+          disabled={busy !== null}
+          className="gap-2"
+          type="button"
+        >
+          {busy === "print" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Printer className="h-4 w-4" />
+          )}
+          Print Gate Pass
         </Button>
       </div>
     </div>
@@ -599,7 +787,11 @@ export function AssetGatePass({
           </SheetPreview>
         </div>
 
-        <GatePassFooter onClose={onClose} printId={PRINT_ID} />
+        <GatePassFooter
+          onClose={onClose}
+          printId={PRINT_ID}
+          fileName={`GatePass_${safeFileName(asset.assetCode ?? "asset")}.pdf`}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -712,7 +904,11 @@ export function MaintenanceGatePass({
           )}
         </div>
 
-        <GatePassFooter onClose={onClose} printId={PRINT_ID} />
+        <GatePassFooter
+          onClose={onClose}
+          printId={PRINT_ID}
+          fileName={`GatePass_${safeFileName(m.ticketNo ?? "maintenance")}.pdf`}
+        />
       </DialogContent>
     </Dialog>
   );
