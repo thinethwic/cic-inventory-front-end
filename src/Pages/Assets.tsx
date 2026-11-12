@@ -33,6 +33,8 @@ import {
   Search,
   Check,
   Banknote,
+  Paperclip,
+  AlertCircle,
 } from "lucide-react";
 
 import {
@@ -79,6 +81,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -357,6 +360,79 @@ interface AssetDetailSheetProps {
   onViewQR: (asset: Asset) => void;
   onGatePass: (asset: Asset) => void;
   isAdmin: boolean;
+}
+
+// ─── Form layout helpers ──────────────────────────────────────────────────────
+const STATUS_DOT: Record<AssetStatus, string> = {
+  Available: "bg-emerald-500",
+  Assigned: "bg-blue-500",
+  "In Repair": "bg-red-500",
+  Disposed: "bg-zinc-400",
+  Damaged: "bg-amber-500",
+};
+
+function FormSection({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold leading-none">{title}</h3>
+          {description && (
+            <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          )}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FormField({
+  label,
+  required,
+  optional,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  optional?: boolean;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn("space-y-1.5", className)}
+      onWheel={(e) => e.stopPropagation()}
+    >
+      <Label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+        {label}
+        {required && <span className="text-destructive">*</span>}
+        {optional && (
+          <span className="font-normal text-muted-foreground/70">
+            (optional)
+          </span>
+        )}
+      </Label>
+      {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
 }
 
 function DetailRow({
@@ -2391,276 +2467,336 @@ export default function Assets() {
       />
 
       {/* ── Add / Edit Dialog ── */}
+      {/* ── Add / Edit Dialog ── */}
       <Dialog
         open={openForm}
         onOpenChange={(open) => {
           if (!saving) setOpenForm(open);
         }}
       >
-        <DialogContent className="flex h-[100dvh] flex-col gap-0 p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-2xl sm:rounded-lg">
-          <DialogHeader className="shrink-0 border-b px-6 py-4">
-            <DialogTitle>{editingId ? "Edit Asset" : "Add Asset"}</DialogTitle>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            {saveError && (
-              <p className="mb-3 text-sm text-destructive">{saveError}</p>
-            )}
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {/* Asset Code */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Asset Code *
-                </Label>
-                <Input
-                  value={form.assetCode}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, assetCode: e.target.value }))
-                  }
-                  placeholder="CIC-IT-LAP-0001"
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Barcode */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Barcode (optional)
-                </Label>
-                <Input
-                  value={form.barcode ?? ""}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, barcode: e.target.value }))
-                  }
-                  placeholder="Scan barcode / enter value"
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Category — from the categories table, with "Add new category" pop-up */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Category *
-                </Label>
-                <Select
-                  value={form.category}
-                  onValueChange={(v) => {
-                    if (v === CUSTOM_CATEGORY_VALUE) {
-                      openCategoryDialog();
-                      return;
-                    }
-                    setForm((p) => ({ ...p, category: v }));
-                  }}
-                  disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {formCategoryOptions.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CUSTOM_CATEGORY_VALUE}>
-                      <span className="flex items-center gap-2 font-medium text-primary">
-                        <Plus className="h-3.5 w-3.5" /> Add new category
-                      </span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Status */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Status</Label>
-                <Select
-                  value={form.status}
-                  onValueChange={(v) =>
-                    setForm((p) => ({ ...p, status: v as AssetStatus }))
-                  }
-                  disabled={saving}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Brand */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Brand</Label>
-                <Input
-                  value={form.brand}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, brand: e.target.value }))
-                  }
-                  placeholder="Dell / HP / Lenovo"
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Model */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Model</Label>
-                <Input
-                  value={form.model}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, model: e.target.value }))
-                  }
-                  placeholder="Latitude 5420"
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Serial No */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Serial No *
-                </Label>
-                <Input
-                  value={form.serialNo}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, serialNo: e.target.value }))
-                  }
-                  placeholder="Serial number"
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Location — searchable combobox */}
-              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <Label className="text-xs text-muted-foreground">
-                  Location *
-                </Label>
-                <LocationCombobox
-                  locations={locations}
-                  value={form.locationId || ""}
-                  onChange={handleLocationChange} // ← was: (v) => setForm(...)
-                  disabled={saving}
-                  loading={lookupLoading}
-                />
-              </div>
-
-              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <Label className="text-xs text-muted-foreground">
-                  Assigned To (optional)
-                </Label>
-                <EmployeeCombobox
-                  employees={employeesForLocation} // ← filtered list
-                  value={
-                    form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
-                  }
-                  onChange={(v) =>
-                    setForm((p) => ({
-                      ...p,
-                      assignedToId: v === "__NONE__" ? "" : v,
-                    }))
-                  }
-                  disabled={saving || !form.locationId} // ← disabled until a location is chosen
-                  loading={lookupLoading}
-                />
-                {!form.locationId && (
-                  <p className="text-xs text-muted-foreground">
-                    Select a location first to see its employees.
-                  </p>
+        <DialogContent className="flex h-[100dvh] flex-col gap-0 p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-3xl sm:rounded-xl">
+          {/* Header */}
+          <DialogHeader className="shrink-0 space-y-0 border-b bg-muted/30 px-6 py-4 text-left">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                {editingId ? (
+                  <Pencil className="h-5 w-5" />
+                ) : (
+                  <Package className="h-5 w-5" />
                 )}
               </div>
-
-              {/* Supplier — searchable combobox */}
-              <div className="space-y-1" onWheel={(e) => e.stopPropagation()}>
-                <Label className="text-xs text-muted-foreground">
-                  Supplier *
-                </Label>
-                <SupplierCombobox
-                  suppliers={suppliers}
-                  value={form.supplierId?.trim() ? form.supplierId : ""}
-                  onChange={(v) => setForm((p) => ({ ...p, supplierId: v }))}
-                  disabled={saving}
-                  loading={lookupLoading}
-                />
-              </div>
-
-              {/* Purchase Date */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Purchase Date (optional)
-                </Label>
-                <Input
-                  type="date"
-                  value={form.purchaseDate ?? ""}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, purchaseDate: e.target.value }))
-                  }
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Warranty End */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Warranty End (optional)
-                </Label>
-                <Input
-                  type="date"
-                  value={form.warrantyEnd ?? ""}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, warrantyEnd: e.target.value }))
-                  }
-                  disabled={saving}
-                />
-              </div>
-
-              {/* Asset Value */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Asset Value (LKR, optional)
-                </Label>
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step="0.01"
-                  value={form.assetValue ?? ""}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, assetValue: e.target.value }))
-                  }
-                  placeholder="0.00"
-                  disabled={saving}
-                />
+              <div className="min-w-0">
+                <DialogTitle className="text-lg">
+                  {editingId ? "Edit Asset" : "Add New Asset"}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  {editingId
+                    ? "Update the details of this asset."
+                    : "Fill in the details to register a new asset."}
+                </DialogDescription>
               </div>
             </div>
+          </DialogHeader>
 
-            <Separator className="my-4" />
-            <AssetAttachments
-              assetId={editingId ?? undefined}
-              stagedFiles={stagedAttachments}
-              onStagedFilesChange={setStagedAttachments}
-              disabled={saving}
-            />
+          {/* Body */}
+          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+            {/* ── Identification ── */}
+            <FormSection
+              icon={Tag}
+              title="Identification"
+              description="How this asset is tracked and scanned"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Asset Code" required>
+                  <Input
+                    value={form.assetCode}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, assetCode: e.target.value }))
+                    }
+                    placeholder="CIC-IT-LAP-0001"
+                    className="font-mono"
+                    disabled={saving}
+                  />
+                </FormField>
+
+                <FormField label="Serial No" required>
+                  <Input
+                    value={form.serialNo}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, serialNo: e.target.value }))
+                    }
+                    placeholder="Serial number"
+                    className="font-mono"
+                    disabled={saving}
+                  />
+                </FormField>
+
+                <FormField label="Barcode" optional className="sm:col-span-2">
+                  <div className="relative">
+                    <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={form.barcode ?? ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, barcode: e.target.value }))
+                      }
+                      placeholder="Scan barcode or enter value"
+                      className="pl-9 font-mono"
+                      disabled={saving}
+                    />
+                  </div>
+                </FormField>
+              </div>
+            </FormSection>
+
+            <Separator />
+
+            {/* ── Device details ── */}
+            <FormSection
+              icon={Package}
+              title="Device Details"
+              description="Category, make and current status"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Category" required>
+                  <Select
+                    value={form.category}
+                    onValueChange={(v) => {
+                      if (v === CUSTOM_CATEGORY_VALUE) {
+                        openCategoryDialog();
+                        return;
+                      }
+                      setForm((p) => ({ ...p, category: v }));
+                    }}
+                    disabled={saving}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formCategoryOptions.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={CUSTOM_CATEGORY_VALUE}>
+                        <span className="flex items-center gap-2 font-medium text-primary">
+                          <Plus className="h-3.5 w-3.5" /> Add new category
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Status">
+                  <Select
+                    value={form.status}
+                    onValueChange={(v) =>
+                      setForm((p) => ({ ...p, status: v as AssetStatus }))
+                    }
+                    disabled={saving}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                STATUS_DOT[s],
+                              )}
+                            />
+                            {s}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Brand" required>
+                  <Input
+                    value={form.brand}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, brand: e.target.value }))
+                    }
+                    placeholder="Dell / HP / Lenovo"
+                    disabled={saving}
+                  />
+                </FormField>
+
+                <FormField label="Model" required>
+                  <Input
+                    value={form.model}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, model: e.target.value }))
+                    }
+                    placeholder="Latitude 5420"
+                    disabled={saving}
+                  />
+                </FormField>
+              </div>
+            </FormSection>
+
+            <Separator />
+
+            {/* ── Location & assignment ── */}
+            <FormSection
+              icon={MapPin}
+              title="Location & Assignment"
+              description="Where the asset is and who uses it"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Location" required>
+                  <LocationCombobox
+                    locations={locations}
+                    value={form.locationId || ""}
+                    onChange={handleLocationChange}
+                    disabled={saving}
+                    loading={lookupLoading}
+                  />
+                </FormField>
+
+                <FormField
+                  label="Assigned To"
+                  optional
+                  hint={
+                    !form.locationId
+                      ? "Select a location first to see its employees."
+                      : undefined
+                  }
+                >
+                  <EmployeeCombobox
+                    employees={employeesForLocation}
+                    value={
+                      form.assignedToId?.trim() ? form.assignedToId : "__NONE__"
+                    }
+                    onChange={(v) =>
+                      setForm((p) => ({
+                        ...p,
+                        assignedToId: v === "__NONE__" ? "" : v,
+                      }))
+                    }
+                    disabled={saving || !form.locationId}
+                    loading={lookupLoading}
+                  />
+                </FormField>
+              </div>
+            </FormSection>
+
+            <Separator />
+
+            {/* ── Procurement ── */}
+            <FormSection
+              icon={Banknote}
+              title="Procurement"
+              description="Supplier, purchase and warranty information"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Supplier" required className="sm:col-span-2">
+                  <SupplierCombobox
+                    suppliers={suppliers}
+                    value={form.supplierId?.trim() ? form.supplierId : ""}
+                    onChange={(v) => setForm((p) => ({ ...p, supplierId: v }))}
+                    disabled={saving}
+                    loading={lookupLoading}
+                  />
+                </FormField>
+
+                <FormField label="Purchase Date" optional>
+                  <Input
+                    type="date"
+                    value={form.purchaseDate ?? ""}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, purchaseDate: e.target.value }))
+                    }
+                    disabled={saving}
+                  />
+                </FormField>
+
+                <FormField label="Warranty End" optional>
+                  <Input
+                    type="date"
+                    value={form.warrantyEnd ?? ""}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, warrantyEnd: e.target.value }))
+                    }
+                    disabled={saving}
+                  />
+                </FormField>
+
+                <FormField label="Asset Value" optional>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-xs font-medium text-muted-foreground">
+                      LKR
+                    </span>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      value={form.assetValue ?? ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, assetValue: e.target.value }))
+                      }
+                      placeholder="0.00"
+                      className="pl-11"
+                      disabled={saving}
+                    />
+                  </div>
+                </FormField>
+              </div>
+            </FormSection>
+
+            <Separator />
+
+            {/* ── Attachments ── */}
+            <FormSection
+              icon={Paperclip}
+              title="Attachments"
+              description="Invoices, warranty cards, photos"
+            >
+              <AssetAttachments
+                assetId={editingId ?? undefined}
+                stagedFiles={stagedAttachments}
+                onStagedFilesChange={setStagedAttachments}
+                disabled={saving}
+              />
+            </FormSection>
           </div>
 
-          <DialogFooter className="shrink-0 border-t px-6 py-4 gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setOpenForm(false)}
-              disabled={saving}
-              type="button"
+          {/* Error banner — outside the scroll area so it's always visible */}
+          {saveError && (
+            <div
+              role="alert"
+              className="flex shrink-0 items-start gap-2 border-t border-destructive/20 bg-destructive/10 px-6 py-2.5 text-sm text-destructive"
             >
-              Cancel
-            </Button>
-            <Button onClick={save} disabled={saving} type="button">
-              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editingId ? "Save Changes" : "Create Asset"}
-            </Button>
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{saveError}</span>
+            </div>
+          )}
+
+          {/* Footer */}
+          <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t bg-muted/30 px-6 py-3 sm:justify-between">
+            <p className="hidden text-xs text-muted-foreground sm:block">
+              <span className="text-destructive">*</span> Required fields
+            </p>
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setOpenForm(false)}
+                disabled={saving}
+                type="button"
+              >
+                Cancel
+              </Button>
+              <Button onClick={save} disabled={saving} type="button">
+                {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editingId ? "Save Changes" : "Create Asset"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

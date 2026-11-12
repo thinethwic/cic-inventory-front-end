@@ -31,6 +31,13 @@ import {
   MapPin,
   X,
   Inbox,
+  Ticket,
+  Package,
+  Wrench,
+  Calendar,
+  StickyNote,
+  AlertCircle,
+  Lock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
@@ -58,10 +65,14 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+import { FormSection, FormField } from "@/Pages/components/FormLayout";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -112,6 +123,7 @@ import { useAssetApi } from "@/lib/api";
 
 import { hasRole } from "@/utils/permissions";
 import { usePermissions } from "@/hooks/usePermissions";
+import { Separator } from "@/components/ui/separator";
 
 // ─── Asset status mapping ─────────────────────────────────────────────────────
 function getAssetStatus(maintenanceStatus: MaintenanceStatus): AssetStatus {
@@ -163,6 +175,24 @@ function PriorityBadge({ priority }: { priority: MaintenancePriority }) {
           : "outline";
   return <Badge variant={variant}>{priority}</Badge>;
 }
+
+const PRIORITY_DOT: Record<MaintenancePriority, string> = {
+  Low: "bg-zinc-400",
+  Medium: "bg-blue-500",
+  High: "bg-amber-500",
+  Critical: "bg-red-500",
+};
+
+const STATUS_DOT: Record<MaintenanceStatus, string> = {
+  Open: "bg-red-500",
+  "In Progress": "bg-blue-500",
+  Completed: "bg-emerald-500",
+  Cancelled: "bg-zinc-400",
+  "Cannot Repair": "bg-amber-500",
+};
+
+const textareaClass =
+  "flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 // ─── Asset Combobox ───────────────────────────────────────────────────────────
 function AssetCombobox({
@@ -865,6 +895,8 @@ export default function MaintenancePage() {
     },
   });
 
+  const formDisabled = saveMutation.isPending || isCompleted;
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const existing = rows.find((x) => x.id === id);
@@ -1265,61 +1297,66 @@ export default function MaintenancePage() {
           if (!saveMutation.isPending) setFormOpen(o);
         }}
       >
-        <DialogContent className="w-full max-w-lg sm:max-w-2xl p-0 gap-0 overflow-hidden [&>button]:hidden">
-          <DialogHeader className="border-b px-4 sm:px-6 py-4 flex flex-row items-center justify-between space-y-0 shrink-0">
-            <DialogTitle className="text-base font-semibold">
-              {editingId ? "Edit Ticket" : "New Ticket"}
-            </DialogTitle>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              onClick={() => setFormOpen(false)}
-              type="button"
-              disabled={saveMutation.isPending}
-            >
-              <span className="sr-only">Close</span>✕
-            </Button>
+        <DialogContent className="flex h-[100dvh] flex-col gap-0 overflow-hidden p-0 sm:h-auto sm:max-h-[90vh] sm:max-w-3xl sm:rounded-xl">
+          {/* Header */}
+          <DialogHeader className="shrink-0 space-y-0 border-b bg-muted/30 px-6 py-4 text-left">
+            <div className="flex items-center gap-3 pr-8">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                {editingId ? (
+                  <Pencil className="h-5 w-5" />
+                ) : (
+                  <Ticket className="h-5 w-5" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-lg">
+                  {editingId ? "Edit Ticket" : "New Maintenance Ticket"}
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  {editingId
+                    ? `Ticket ${form.ticketNo}`
+                    : "Ticket number is generated automatically."}
+                </DialogDescription>
+              </div>
+              {editingId && <StatusBadge status={form.status} />}
+            </div>
           </DialogHeader>
 
-          <div className="overflow-y-auto max-h-[70vh] px-4 sm:px-6 py-4 space-y-4">
-            {/* Completed notice */}
+          {/* Body */}
+          <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
             {isCompleted && (
-              <div className="rounded-md bg-muted px-4 py-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                <Lock className="h-4 w-4 shrink-0" />
                 This ticket is completed and cannot be edited.
               </div>
             )}
 
-            {formError && (
-              <div className="rounded-md bg-destructive/10 px-4 py-2 text-sm text-destructive">
-                {formError}
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Ticket No</Label>
-              <Input
-                value={editingId ? form.ticketNo : "Auto generated by system"}
-                disabled
-                readOnly
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Asset *</Label>
-              {editingId ? (
-                <Input value={form.assetCode} disabled readOnly />
-              ) : (
-                <AssetCombobox
-                  assets={assets}
-                  value={form.assetId}
-                  onChange={onAssetChange}
-                  disabled={saveMutation.isPending}
-                />
-              )}
+            {/* ── Asset ── */}
+            <FormSection
+              icon={Package}
+              title="Asset"
+              description="The asset this ticket is raised for"
+            >
+              <FormField label="Asset" required>
+                {editingId ? (
+                  <Input
+                    value={form.assetCode}
+                    className="font-mono"
+                    disabled
+                    readOnly
+                  />
+                ) : (
+                  <AssetCombobox
+                    assets={assets}
+                    value={form.assetId}
+                    onChange={onAssetChange}
+                    disabled={saveMutation.isPending}
+                  />
+                )}
+              </FormField>
 
               {selectedAsset && (
-                <div className="mt-2 grid grid-cols-1 gap-3 rounded-md border bg-muted/40 px-3 py-2.5 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 rounded-lg border bg-muted/40 px-4 py-3 sm:grid-cols-3">
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Asset Code</p>
                     <p className="truncate font-mono text-sm font-medium">
@@ -1340,220 +1377,310 @@ export default function MaintenancePage() {
                   </div>
                 </div>
               )}
-            </div>
+            </FormSection>
 
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Issue Title *
-              </Label>
-              <Input
-                value={form.issueTitle}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, issueTitle: e.target.value }))
-                }
-                placeholder="Battery health degraded"
-                disabled={saveMutation.isPending || isCompleted}
-              />
-            </div>
+            <Separator />
 
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">
-                Description
-              </Label>
-              <Input
-                value={form.description ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, description: e.target.value }))
-                }
-                placeholder="Describe the issue briefly..."
-                disabled={saveMutation.isPending || isCompleted}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Priority
-                </Label>
-                <Select
-                  value={form.priority}
-                  onValueChange={(v) =>
-                    setForm((p) => ({
-                      ...p,
-                      priority: v as MaintenancePriority,
-                    }))
-                  }
-                  disabled={saveMutation.isPending || isCompleted}
+            {/* ── Issue ── */}
+            <FormSection
+              icon={Wrench}
+              title="Issue Details"
+              description="What is wrong and how urgent it is"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField
+                  label="Issue Title"
+                  required
+                  className="sm:col-span-2"
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {maintenancePriorityOptions.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Status</Label>
-                <Select
-                  value={form.status}
-                  onValueChange={(v) =>
-                    setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
-                  }
-                  disabled={saveMutation.isPending || isCompleted}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredStatusOptions.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Reported Date *
-                </Label>
-                <Input
-                  type="date"
-                  value={form.reportedDate}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, reportedDate: e.target.value }))
-                  }
-                  disabled={saveMutation.isPending || isCompleted}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">
-                  Location
-                </Label>
-                <Input
-                  value={form.location ?? ""}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, location: e.target.value }))
-                  }
-                  placeholder="Location"
-                  disabled={saveMutation.isPending || !isAdmin || isCompleted}
-                />
-              </div>
-            </div>
-
-            {isAdmin && (
-              <>
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">
-                    Due Date
-                  </Label>
                   <Input
-                    type="date"
-                    value={form.dueDate ?? ""}
+                    value={form.issueTitle}
                     onChange={(e) =>
-                      setForm((p) => ({ ...p, dueDate: e.target.value }))
+                      setForm((p) => ({ ...p, issueTitle: e.target.value }))
                     }
-                    disabled={saveMutation.isPending || isCompleted}
+                    placeholder="Battery health degraded"
+                    disabled={formDisabled}
                   />
-                </div>
+                </FormField>
 
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <Label className="text-xs text-muted-foreground">
-                      Assigned To
-                    </Label>
-                    <TechnicianToggle
-                      value={technicianType}
-                      onChange={(t) => {
-                        setTechnicianType(t);
-                        setForm((p) => ({ ...p, assignedTo: "" }));
-                      }}
-                      disabled={saveMutation.isPending || isCompleted}
-                    />
-                  </div>
-                  {technicianType === "supplier" ? (
-                    <SupplierCombobox
-                      suppliers={suppliers}
-                      value={form.assignedTo ?? ""}
-                      onChange={(name) =>
-                        setForm((p) => ({ ...p, assignedTo: name }))
-                      }
-                      disabled={saveMutation.isPending || isCompleted}
-                      loading={suppliersLoading}
-                    />
-                  ) : (
-                    <Input
-                      value={form.assignedTo ?? ""}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, assignedTo: e.target.value }))
-                      }
-                      placeholder="Technician name"
-                      disabled={saveMutation.isPending || isCompleted}
-                    />
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs text-muted-foreground">Cost</Label>
-                  <Input
-                    type="number"
-                    value={form.cost ?? ""}
+                <FormField
+                  label="Description"
+                  optional
+                  className="sm:col-span-2"
+                >
+                  <textarea
+                    value={form.description ?? ""}
                     onChange={(e) =>
+                      setForm((p) => ({ ...p, description: e.target.value }))
+                    }
+                    placeholder="Describe the issue briefly..."
+                    className={textareaClass}
+                    rows={3}
+                    disabled={formDisabled}
+                  />
+                </FormField>
+
+                <FormField label="Priority">
+                  <Select
+                    value={form.priority}
+                    onValueChange={(v) =>
                       setForm((p) => ({
                         ...p,
-                        cost:
-                          e.target.value === ""
-                            ? undefined
-                            : Number(e.target.value),
+                        priority: v as MaintenancePriority,
                       }))
                     }
-                    placeholder="0"
-                    disabled={saveMutation.isPending || isCompleted}
+                    disabled={formDisabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {maintenancePriorityOptions.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                PRIORITY_DOT[p],
+                              )}
+                            />
+                            {p}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+
+                <FormField label="Status">
+                  <Select
+                    value={form.status}
+                    onValueChange={(v) =>
+                      setForm((p) => ({ ...p, status: v as MaintenanceStatus }))
+                    }
+                    disabled={formDisabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {filteredStatusOptions.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                STATUS_DOT[s],
+                              )}
+                            />
+                            {s}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              </div>
+            </FormSection>
+
+            <Separator />
+
+            {/* ── Schedule & location ── */}
+            <FormSection
+              icon={Calendar}
+              title="Schedule & Location"
+              description="When it was reported and where the asset is"
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Reported Date" required>
+                  <Input
+                    type="date"
+                    value={form.reportedDate}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, reportedDate: e.target.value }))
+                    }
+                    disabled={formDisabled}
                   />
-                </div>
+                </FormField>
+
+                {isAdmin && (
+                  <FormField label="Due Date" optional>
+                    <Input
+                      type="date"
+                      value={form.dueDate ?? ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, dueDate: e.target.value }))
+                      }
+                      disabled={formDisabled}
+                    />
+                  </FormField>
+                )}
+
+                <FormField
+                  label="Location"
+                  className={isAdmin ? "sm:col-span-2" : undefined}
+                >
+                  <div className="relative">
+                    <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={form.location ?? ""}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, location: e.target.value }))
+                      }
+                      placeholder="Location"
+                      className="pl-9"
+                      disabled={formDisabled || !isAdmin}
+                    />
+                  </div>
+                </FormField>
+              </div>
+            </FormSection>
+
+            {/* ── Assignment & cost (admin only) ── */}
+            {isAdmin && (
+              <>
+                <Separator />
+                <FormSection
+                  icon={User}
+                  title="Assignment & Cost"
+                  description="Who is fixing it and what it costs"
+                >
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div
+                      className="space-y-1.5 sm:col-span-2"
+                      onWheel={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <Label className="text-xs font-medium text-muted-foreground">
+                          Assigned To{" "}
+                          <span className="font-normal text-muted-foreground/70">
+                            (optional)
+                          </span>
+                        </Label>
+                        <TechnicianToggle
+                          value={technicianType}
+                          onChange={(t) => {
+                            setTechnicianType(t);
+                            setForm((p) => ({ ...p, assignedTo: "" }));
+                          }}
+                          disabled={formDisabled}
+                        />
+                      </div>
+                      {technicianType === "supplier" ? (
+                        <SupplierCombobox
+                          suppliers={suppliers}
+                          value={form.assignedTo ?? ""}
+                          onChange={(name) =>
+                            setForm((p) => ({ ...p, assignedTo: name }))
+                          }
+                          disabled={formDisabled}
+                          loading={suppliersLoading}
+                        />
+                      ) : (
+                        <Input
+                          value={form.assignedTo ?? ""}
+                          onChange={(e) =>
+                            setForm((p) => ({
+                              ...p,
+                              assignedTo: e.target.value,
+                            }))
+                          }
+                          placeholder="Technician name"
+                          disabled={formDisabled}
+                        />
+                      )}
+                    </div>
+
+                    <FormField label="Cost" optional>
+                      <div className="relative">
+                        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-xs font-medium text-muted-foreground">
+                          LKR
+                        </span>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          value={form.cost ?? ""}
+                          onChange={(e) =>
+                            setForm((p) => ({
+                              ...p,
+                              cost:
+                                e.target.value === ""
+                                  ? undefined
+                                  : Number(e.target.value),
+                            }))
+                          }
+                          placeholder="0.00"
+                          className="pl-11"
+                          disabled={formDisabled}
+                        />
+                      </div>
+                    </FormField>
+                  </div>
+                </FormSection>
               </>
             )}
 
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">Notes</Label>
-              <Input
-                value={form.notes ?? ""}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, notes: e.target.value }))
-                }
-                placeholder="Extra notes..."
-                disabled={saveMutation.isPending || isCompleted}
-              />
-            </div>
+            <Separator />
+
+            {/* ── Notes ── */}
+            <FormSection
+              icon={StickyNote}
+              title="Notes"
+              description="Anything else worth recording"
+            >
+              <FormField label="Notes" optional>
+                <textarea
+                  value={form.notes ?? ""}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, notes: e.target.value }))
+                  }
+                  placeholder="Extra notes..."
+                  className={textareaClass}
+                  rows={3}
+                  disabled={formDisabled}
+                />
+              </FormField>
+            </FormSection>
           </div>
 
-          <DialogFooter className="border-t px-4 sm:px-6 py-3 flex flex-row justify-end gap-2 shrink-0">
-            <Button
-              variant="outline"
-              onClick={() => setFormOpen(false)}
-              type="button"
-              disabled={saveMutation.isPending}
+          {/* Error banner — outside the scroll area so it's always visible */}
+          {formError && (
+            <div
+              role="alert"
+              className="flex shrink-0 items-start gap-2 border-t border-destructive/20 bg-destructive/10 px-6 py-2.5 text-sm text-destructive"
             >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => saveMutation.mutate()}
-              type="button"
-              disabled={saveMutation.isPending || isCompleted}
-            >
-              {saveMutation.isPending && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              {editingId ? "Save Changes" : "Create Ticket"}
-            </Button>
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{formError}</span>
+            </div>
+          )}
+
+          {/* Footer */}
+          <DialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t bg-muted/30 px-6 py-3 sm:justify-between">
+            <p className="hidden text-xs text-muted-foreground sm:block">
+              <span className="text-destructive">*</span> Required fields
+            </p>
+            <div className="ml-auto flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setFormOpen(false)}
+                type="button"
+                disabled={saveMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => saveMutation.mutate()}
+                type="button"
+                disabled={formDisabled}
+              >
+                {saveMutation.isPending && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
+                {editingId ? "Save Changes" : "Create Ticket"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

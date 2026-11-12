@@ -125,7 +125,7 @@ export const generateAssetReport = async (assets: Asset[]) => {
 
     autoTable(doc, {
         startY,
-        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Purchase Date"]],
+        head: [["Asset Code", "Category", "Model", "Serial No", "Status", "Location", "Assigned To", "Purchase Date"]],
         body: rows,
         styles: { fontSize: 8 },
         headStyles: { fillColor: [59, 130, 246] },
@@ -142,7 +142,7 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
     const headers = [
         "Asset Code", "Category", "Brand", "Model", "Serial No",
         "Status", "Location", "Assigned To",
-        "Purchase Date", "Warranty End",
+        "Purchase Date", "Warranty End", "Asset Value",
     ];
 
     const rows = assets.map((a) => [
@@ -156,15 +156,18 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
         a.assignedTo ?? "",
         a.purchaseDate ?? "",
         a.warrantyEnd ?? "",
+        a.assetValue ?? "",
     ]);
 
     const wsData = [headers, ...rows];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     styleHeaderRow(ws, headers, "3B82F6");
 
-    ws["!cols"] = headers.map((h, i) => ({
-        wch: Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)) + 2,
-    }));
+    const valueCol = headers.indexOf("Asset Value");
+    rows.forEach((_, i) => {
+        const ref = XLSX.utils.encode_cell({ r: i + 1, c: valueCol });
+        if (ws[ref] && typeof ws[ref].v === "number") ws[ref].z = "#,##0.00";
+    });
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Assets");
@@ -179,10 +182,13 @@ export const generateAssetReportExcel = (assets: Asset[]) => {
         if (a.location) locationCounts[a.location] = (locationCounts[a.location] ?? 0) + 1;
     });
 
+    const totalValue = assets.reduce((sum, a) => sum + (a.assetValue ?? 0), 0);
+
     const summaryRows: (string | number)[][] = [
         [COMPANY_NAME],
         [`Generated: ${new Date().toLocaleDateString()}`],
         [`Total Assets: ${assets.length}`],
+        [`Total Asset Value: ${totalValue.toLocaleString()}`],
         [],
         ["── By Status ──"],
         ["Status", "Count"],
@@ -237,6 +243,7 @@ function buildFilterSubtitle(filters: AssetReportFilters): string | undefined {
 function buildExcelMetaRows(
     filters: AssetReportFilters,
     totalRecords: number,
+    totalValue: number,
 ): (string | number)[][] {
     const filterParts: string[] = [];
     if (filters.supplierName) filterParts.push(`Supplier: ${filters.supplierName}`);
@@ -255,6 +262,7 @@ function buildExcelMetaRows(
             ? [[`Filters: ${filterParts.join("  |  ")}`]]
             : []),
         [`Total Records: ${totalRecords}`],
+        [`Total Asset Value: ${totalValue.toLocaleString()}`],
         [],
     ];
 }
@@ -286,7 +294,7 @@ export const generateFilteredAssetReport = async (
 
     autoTable(doc, {
         startY,
-        head: [["Asset Code", "Category", "Model", "Serial", "Status", "Location", "Assigned To", "Purchase Date"]],
+        head: [["Asset Code", "Category", "Model", "Serial No", "Status", "Location", "Assigned To", "Purchase Date"]],
         body: rows,
         styles: { fontSize: 8 },
         headStyles: { fillColor: [168, 85, 247] },
@@ -306,7 +314,7 @@ export const generateFilteredAssetReportExcel = (
     const headers = [
         "Asset Code", "Category", "Brand", "Model", "Serial No",
         "Status", "Location", "Assigned To",
-        "Purchase Date", "Warranty End",
+        "Purchase Date", "Warranty End", "Asset Value",
     ];
 
     const rows = assets.map((a) => [
@@ -320,14 +328,27 @@ export const generateFilteredAssetReportExcel = (
         a.assignedTo ?? "",
         a.purchaseDate ?? "",
         a.warrantyEnd ?? "",
+        a.assetValue ?? "",   // number or blank (handles null/undefined)
     ]);
 
-    const metaRows = buildExcelMetaRows(filters, assets.length);
 
-    const wsData = [...metaRows, headers, ...rows];
+    const totalValue = assets.reduce((sum, a) => sum + (a.assetValue ?? 0), 0);
+    const metaRows = buildExcelMetaRows(filters, assets.length, totalValue);
+
+    const wsData = [...metaRows, headers, ...rows];   // meta rows go first
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
     const headerRowIdx = metaRows.length;
+    const firstDataRow = headerRowIdx + 1;
+    const valueCol = headers.indexOf("Asset Value");
+
+    // number format for Asset Value
+    rows.forEach((_, i) => {
+        const ref = XLSX.utils.encode_cell({ r: firstDataRow + i, c: valueCol });
+        if (ws[ref] && typeof ws[ref].v === "number") ws[ref].z = "#,##0.00";
+    });
+
+    // header styling (on the real header row)
     headers.forEach((_, colIdx) => {
         const cellRef = XLSX.utils.encode_cell({ r: headerRowIdx, c: colIdx });
         if (!ws[cellRef]) return;
@@ -411,6 +432,8 @@ export const generateMaintenanceReportExcel = (maintenance: Maintenance[]) => {
         statusCounts[m.status] = (statusCounts[m.status] ?? 0) + 1;
         priorityCounts[m.priority] = (priorityCounts[m.priority] ?? 0) + 1;
     });
+
+
 
     const summaryRows: (string | number)[][] = [
         [COMPANY_NAME],

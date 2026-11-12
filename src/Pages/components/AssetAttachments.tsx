@@ -1,7 +1,15 @@
 // src/Pages/components/AssetAttachments.tsx
 import * as React from "react";
 import { toast } from "sonner";
-import { Paperclip, FileText, Download, Eye, Trash2, Loader2, Clock } from "lucide-react";
+import {
+  Paperclip,
+  FileText,
+  Download,
+  Eye,
+  Trash2,
+  Loader2,
+  Clock,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   useAssetAttachmentApi,
@@ -9,10 +17,12 @@ import {
   type AssetAttachment,
 } from "@/lib/asset-attachment-api";
 
+const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024; // 2 MB per file
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`; // ← was toFixed(1)
 }
 
 function AttachmentThumbnail({
@@ -118,11 +128,29 @@ export function AssetAttachments({
       const files = e.target.files;
       if (!files || files.length === 0) return;
       // Snapshot to a real array before resetting the input's value — the
-      // live FileList reflects the reset too, so reading it afterwards
-      // (or checking .length after clearing) sees 0 files.
-      const newFiles = Array.from(files);
+      // live FileList reflects the reset too.
+      const picked = Array.from(files);
       e.target.value = "";
-      onStagedFilesChange([...stagedFiles, ...newFiles]);
+
+      const accepted = picked.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
+      const rejected = picked.filter((f) => f.size > MAX_ATTACHMENT_BYTES);
+
+      if (rejected.length > 0) {
+        toast.error(
+          rejected.length === 1
+            ? "File is too large"
+            : `${rejected.length} files are too large`,
+          {
+            description: `${rejected
+              .map((f) => `${f.name} (${formatBytes(f.size)})`)
+              .join(", ")} — the maximum is 2 MB per file.`,
+          },
+        );
+      }
+
+      if (accepted.length > 0) {
+        onStagedFilesChange([...stagedFiles, ...accepted]);
+      }
     },
     [stagedFiles, onStagedFilesChange],
   );
@@ -188,7 +216,8 @@ export function AssetAttachments({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          Attachments (screenshots, invoices, warranty documents)
+          Attachments (Screenshots, Invoices, Warranty Documents) · Max 2 MB
+          Each
         </div>
         {!readOnly && (
           <div>
@@ -230,7 +259,10 @@ export function AssetAttachments({
                   className="flex items-center gap-3 rounded-md border p-2"
                 >
                   {isImageContentType(attachment.contentType) ? (
-                    <AttachmentThumbnail assetId={assetId} attachment={attachment} />
+                    <AttachmentThumbnail
+                      assetId={assetId}
+                      attachment={attachment}
+                    />
                   ) : (
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-muted">
                       <FileText className="h-5 w-5 text-muted-foreground" />
@@ -238,7 +270,9 @@ export function AssetAttachments({
                   )}
 
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{attachment.fileName}</p>
+                    <p className="truncate text-sm font-medium">
+                      {attachment.fileName}
+                    </p>
                     <p className="text-xs text-muted-foreground">
                       {formatBytes(attachment.fileSize)}
                     </p>
@@ -320,11 +354,16 @@ export function AssetAttachments({
       )}
 
       {!assetId && stagedFiles.length === 0 && (
-        <p className="text-sm text-muted-foreground">No attachments added yet.</p>
+        <p className="text-sm text-muted-foreground">
+          No attachments added yet.
+        </p>
       )}
-      {assetId && !loading && attachments.length === 0 && stagedFiles.length === 0 && (
-        <p className="text-sm text-muted-foreground">No attachments yet.</p>
-      )}
+      {assetId &&
+        !loading &&
+        attachments.length === 0 &&
+        stagedFiles.length === 0 && (
+          <p className="text-sm text-muted-foreground">No attachments yet.</p>
+        )}
     </div>
   );
 }
